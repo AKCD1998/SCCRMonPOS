@@ -389,8 +389,11 @@ namespace SCCRMonPOS
 
         /// <summary>
         /// Decodes the JWT payload and checks whether the exp claim is in the past.
-        /// Returns true (expired) if the token is missing, malformed, or expired.
-        /// A 30-second clock-skew buffer is applied.
+        /// Returns true  (expired) if the token is null/empty, or if its exp claim
+        /// is in the past (with a 30-second clock-skew buffer).
+        /// Returns false (valid)   if the token is opaque (no dots — not a JWT),
+        /// has no exp claim, or cannot be decoded.  The server will reject a revoked
+        /// opaque token with HTTP 401, which triggers TokenExpiredException normally.
         /// </summary>
         private static bool IsJwtExpired(string token)
         {
@@ -398,7 +401,7 @@ namespace SCCRMonPOS
             try
             {
                 string[] parts = token.Split('.');
-                if (parts.Length < 2) return true;
+                if (parts.Length < 2) return false; // opaque token (no dots) — not a JWT; assume valid, server will reject if revoked
 
                 // base64url → standard base64
                 string b64 = parts[1].Replace('-', '+').Replace('_', '/');
