@@ -1,0 +1,12 @@
+# Build outputs
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+
+# Runtime data folder (contains encrypted token, logs, queue)
+SCCRMonPOS/data/
