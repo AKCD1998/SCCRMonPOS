@@ -24,16 +24,25 @@ namespace SCCRMonPOS
 
         private NotifyIcon          _trayIcon;
         private ScannerInputService _scanner;
+        private AdaPosWatcher       _watcher;
         private ApiClient           _api;
+        private ProductEligibilityClient _productEligibility;
         private StaffAuthManager    _auth;
         private TransactionRepository _txRepo;
         private OfflineQueue          _offlineQueue;
+        private readonly bool _requireProductScreening;
 
         // Only one member-point popup may be open at a time
         private MemberPointForm _activeForm;
 
-        // Tray menu item for the offline queue — updated when queue count changes
+        // Most-recently completed AdaPos receipt, waiting for a CRM barcode scan.
+        // Written from the watcher background thread; read on the UI thread — guarded by _receiptLock.
+        private PosReceipt        _standingByReceipt;
+        private readonly object   _receiptLock = new object();
+
+        // Tray menu items
         private ToolStripMenuItem _miSyncPending;
+        private ToolStripMenuItem _miWatcherStatus;
 
         // ────────────────────────────────────────────────────────────────────
         public TrayAppContext()
@@ -42,11 +51,15 @@ namespace SCCRMonPOS
 
             string baseUrl = ConfigurationManager.AppSettings["ApiBaseUrl"]
                           ?? "https://sc-official-website.onrender.com";
+            string productEligibilityBaseUrl = ConfigurationManager.AppSettings["ProductEligibilityApiBaseUrl"] ?? "";
+            string productEligibilityApiKey  = ConfigurationManager.AppSettings["ProductEligibilityApiKey"] ?? "";
 
-            _api          = new ApiClient(baseUrl);
-            _auth         = new StaffAuthManager(_dataFolder);
-            _txRepo       = new TransactionRepository(_dataFolder);
-            _offlineQueue = new OfflineQueue(_dataFolder);
+            _api                     = new ApiClient(baseUrl);
+            _productEligibility      = new ProductEligibilityClient(productEligibilityBaseUrl, productEligibilityApiKey);
+            _auth                    = new StaffAuthManager(_dataFolder);
+            _txRepo                  = new TransactionRepository(_dataFolder);
+            _offlineQueue            = new OfflineQueue(_dataFolder);
+            _requireProductScreening = ReadBool("RequireProductScreeningForPoints", true);
 
             if (_auth.HasToken)
                 _api.SetStaffToken(_auth.StaffToken);
@@ -64,6 +77,7 @@ namespace SCCRMonPOS
             else
             {
                 InitScanner();
+                InitWatcher();
                 UpdateSyncMenuItem();
                 _trayIcon.ShowBalloonTip(2000, "SCCRM", "พร้อมรับการสแกนบาร์โค้ด", ToolTipIcon.Info);
 
@@ -83,6 +97,7 @@ namespace SCCRMonPOS
             if (result == DialogResult.OK)
             {
                 InitScanner();
+                InitWatcher();
                 UpdateSyncMenuItem();
                 _trayIcon.ShowBalloonTip(2000, "SCCRM",
                     "เข้าสู่ระบบสำเร็จ — พร้อมรับการสแกน", ToolTipIcon.Info);
@@ -106,10 +121,16 @@ namespace SCCRMonPOS
                 Enabled = false
             };
 
+            _miWatcherStatus = new ToolStripMenuItem("AdaPos DB: รอเชื่อมต่อ…")
+            {
+                Enabled = false
+            };
+
             var menu = new ContextMenuStrip();
             menu.Items.Add("เปิดหน้าต่างค้นหาสมาชิก", null, OnOpenSearchWindow);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_miSyncPending);
+            menu.Items.Add(_miWatcherStatus);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("เปลี่ยน PIN / Device",     null, OnReAuthenticate);
             menu.Items.Add(new ToolStripSeparator());
@@ -135,6 +156,66 @@ namespace SCCRMonPOS
             _scanner.PointScanDetected  += OnPointScan;
             _scanner.RedeemScanDetected += OnRedeemScan;
             _scanner.Start();
+        }
+
+        // ── AdaPos DB watcher ──────────────────────────────────────────────────
+
+        private void InitWatcher()
+        {
+            if (_watcher != null) return;
+            _watcher = new AdaPosWatcher();
+            if (!_watcher.IsEnabled) return;
+
+            _watcher.ReceiptCompleted    += OnReceiptCompleted;
+            _watcher.ReturnDetected      += OnReturnDetected;
+            _watcher.WatcherConnected    += OnWatcherConnected;
+            _watcher.WatcherDisconnected += OnWatcherDisconnected;
+            _watcher.Start();
+        }
+
+        // Called from the watcher background thread — only update in-memory state here.
+        private void OnReceiptCompleted(object sender, PosReceipt receipt)
+        {
+            lock (_receiptLock)
+                _standingByReceipt = receipt;
+        }
+
+        private void OnReturnDetected(object sender, PosReceipt receipt)
+        {
+            // Overwrite standing-by with the return so it doesn't trigger loyalty on a refund
+            lock (_receiptLock)
+                _standingByReceipt = null;
+
+            ScheduleOnUiThread(() =>
+                _trayIcon.ShowBalloonTip(4000, "SCCRM — คืนสินค้า",
+                    $"ตรวจพบรายการคืนสินค้า {receipt.DocNo}\n" +
+                    $"อ้างอิงบิลเดิม: {receipt.OriginalDocNo}\n" +
+                    "กรุณาตรวจสอบแต้มใน CRM",
+                    ToolTipIcon.Warning));
+        }
+
+        private void OnWatcherConnected(object sender, EventArgs e)
+        {
+            ScheduleOnUiThread(() =>
+            {
+                if (_miWatcherStatus != null)
+                    _miWatcherStatus.Text = "AdaPos DB: เชื่อมต่อแล้ว ✓";
+            });
+        }
+
+        private void OnWatcherDisconnected(object sender, string errorMessage)
+        {
+            lock (_receiptLock)
+                _standingByReceipt = null;
+
+            ScheduleOnUiThread(() =>
+            {
+                if (_miWatcherStatus != null)
+                    _miWatcherStatus.Text = "AdaPos DB: ขาดการเชื่อมต่อ ⚠";
+                _trayIcon.ShowBalloonTip(4000, "SCCRM — AdaPos DB",
+                    "ขาดการเชื่อมต่อกับฐานข้อมูล AdaPos\nจะลองเชื่อมต่อใหม่อัตโนมัติ",
+                    ToolTipIcon.Warning);
+            });
         }
 
         // ── Scanner events ─────────────────────────────────────────────────────
@@ -203,12 +284,17 @@ namespace SCCRMonPOS
             _scanner?.Stop();
             _scanner?.Dispose();
             _scanner = null;
+            _watcher?.Stop();
+            _watcher?.Dispose();
+            _watcher = null;
+            lock (_receiptLock) _standingByReceipt = null;
             PromptStaffLogin();
         }
 
         private void OnExit(object sender, EventArgs e)
         {
             _scanner?.Stop();
+            _watcher?.Stop();
             _trayIcon.Visible = false;
             Application.Exit();
         }
@@ -225,6 +311,10 @@ namespace SCCRMonPOS
             _scanner?.Stop();
             _scanner?.Dispose();
             _scanner = null;
+            _watcher?.Stop();
+            _watcher?.Dispose();
+            _watcher = null;
+            lock (_receiptLock) _standingByReceipt = null;
             PromptStaffLogin();
         }
 
@@ -271,7 +361,17 @@ namespace SCCRMonPOS
             if (_activeForm != null && !_activeForm.IsDisposed)
                 return;
 
-            _activeForm = new MemberPointForm(scanToken, _api, _txRepo, _offlineQueue);
+            // Consume the standing-by receipt — cleared so the next sale starts fresh
+            PosReceipt receipt;
+            lock (_receiptLock)
+            {
+                receipt = _standingByReceipt;
+                _standingByReceipt = null;
+            }
+
+            _activeForm = new MemberPointForm(
+                scanToken, _api, _txRepo, _offlineQueue, _productEligibility,
+                _requireProductScreening, receipt);
             _activeForm.SessionExpired += (s, e) =>
             {
                 // MemberPointForm already closed itself; now handle re-auth
@@ -298,6 +398,13 @@ namespace SCCRMonPOS
             t.Start();
         }
 
+        private static bool ReadBool(string key, bool defaultValue)
+        {
+            string raw = ConfigurationManager.AppSettings[key];
+            bool parsed;
+            return bool.TryParse(raw, out parsed) ? parsed : defaultValue;
+        }
+
         private static Icon BuildTrayIcon()
         {
             using (var bmp = new Bitmap(16, 16))
@@ -320,6 +427,7 @@ namespace SCCRMonPOS
             if (disposing)
             {
                 _scanner?.Dispose();
+                _watcher?.Dispose();
                 _trayIcon?.Dispose();
             }
             base.Dispose(disposing);

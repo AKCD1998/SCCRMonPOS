@@ -43,6 +43,7 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Configuration" />
+    <Reference Include="System.Data" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Runtime.Serialization" />
     <!-- System.Security provides ProtectedData (DPAPI) -->
@@ -57,7 +58,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="AdaPosWatcher.cs" />
     <Compile Include="ApiClient.cs" />
+    <Compile Include="ProductEligibilityClient.cs" />
     <Compile Include="OfflineQueue.cs" />
     <Compile Include="StaffAuthManager.cs" />
     <Compile Include="StaffLoginForm.cs" />
@@ -66,6 +69,7 @@
     <Compile Include="TrayAppContext.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Models\Member.cs" />
+    <Compile Include="Models\PosReceipt.cs" />
     <Compile Include="Models\TransactionLog.cs" />
     <Compile Include="TransactionRepository.cs" />
   </ItemGroup>

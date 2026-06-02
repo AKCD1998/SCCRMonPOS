@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Drawing;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using SCCRMonPOS.Models;
+using System.Linq;
 
 namespace SCCRMonPOS
 {
@@ -22,6 +24,7 @@ namespace SCCRMonPOS
     {
         // ── Dependencies ─────────────────────────────────────────────────────
         private readonly ApiClient            _api;
+        private readonly ProductEligibilityClient _productEligibility;
         private readonly TransactionRepository _txRepo;
         private readonly OfflineQueue          _offlineQueue;
 
@@ -30,7 +33,11 @@ namespace SCCRMonPOS
         private int         _step = 1;
 
         // ── Config ───────────────────────────────────────────────────────────
-        private readonly decimal _bahtPerPoint;
+        private readonly decimal    _bahtPerPoint;
+        private readonly bool       _requireProductScreening;
+
+        // ── AdaPos standing-by receipt (may be null for manual flow) ─────────
+        private readonly PosReceipt _posReceipt;
 
         // ── Step-1 controls ──────────────────────────────────────────────────
         private Panel    _pnlStep1;
@@ -44,6 +51,13 @@ namespace SCCRMonPOS
         private Label   _lblS2MemberCode, _lblS2Name, _lblS2CurPoints;
         private TextBox _txtReceiptNo, _txtBillAmount;
         private Label   _lblEarned, _lblStep2Error;
+        private TextBox _txtProductCode;
+        private Button  _btnAddProduct, _btnClearProducts;
+        private ListView _lvProducts;
+        private Label   _lblProductSummary;
+        private CheckBox _chkEligibleSubtotalConfirmed;
+
+        private readonly List<ScreenedProduct> _screenedProducts = new List<ScreenedProduct>();
 
         // ── Shared bottom bar ────────────────────────────────────────────────
         private Button _btnBack, _btnNext;
@@ -57,13 +71,22 @@ namespace SCCRMonPOS
         public event EventHandler SessionExpired;
 
         // ────────────────────────────────────────────────────────────────────
-        public MemberPointForm(string initialToken, ApiClient api,
-                               TransactionRepository txRepo, OfflineQueue offlineQueue)
+        public MemberPointForm(
+            string initialToken,
+            ApiClient api,
+            TransactionRepository txRepo,
+            OfflineQueue offlineQueue,
+            ProductEligibilityClient productEligibility,
+            bool requireProductScreening,
+            PosReceipt posReceipt = null)
         {
-            _api          = api;
-            _txRepo       = txRepo;
-            _offlineQueue = offlineQueue;
-            _bahtPerPoint = ReadDecimal("BahtPerPoint", 10m);
+            _api                     = api;
+            _txRepo                  = txRepo;
+            _offlineQueue            = offlineQueue;
+            _productEligibility      = productEligibility;
+            _requireProductScreening = requireProductScreening;
+            _bahtPerPoint            = ReadDecimal("BahtPerPoint", 10m);
+            _posReceipt              = posReceipt;
 
             BuildUi();
 
@@ -83,7 +106,7 @@ namespace SCCRMonPOS
             SuspendLayout();
 
             Text            = "SCCRM — สะสมแต้มสมาชิก";
-            ClientSize      = new Size(480, 390);
+            ClientSize      = new Size(480, _requireProductScreening ? 610 : 390);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
@@ -168,7 +191,12 @@ namespace SCCRMonPOS
 
         private void BuildStep2Panel()
         {
-            _pnlStep2 = new Panel { Location = new Point(0, 0), Size = new Size(480, 328), Visible = false };
+            _pnlStep2 = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(480, _requireProductScreening ? 548 : 328),
+                Visible = false
+            };
 
             var grpSummary = new GroupBox { Text = "ข้อมูลสมาชิก", Location = new Point(18, 10), Size = new Size(440, 100) };
             _lblS2MemberCode = InfoLine(grpSummary, "รหัสสมาชิก :", 24);
@@ -177,12 +205,19 @@ namespace SCCRMonPOS
             _lblS2CurPoints.ForeColor = Color.DarkBlue;
             _lblS2CurPoints.Font      = new Font("Tahoma", 9.5f, FontStyle.Bold);
 
-            var grpBill = new GroupBox { Text = "ข้อมูลบิล", Location = new Point(18, 120), Size = new Size(440, 160) };
+            var grpBill = new GroupBox
+            {
+                Text = _requireProductScreening ? "ข้อมูลบิลและคัดกรองสินค้า" : "ข้อมูลบิล",
+                Location = new Point(18, 120),
+                Size = new Size(440, _requireProductScreening ? 380 : 160)
+            };
 
             var lblReceiptC = MakeLabel("หมายเลขใบเสร็จ :", new Point(12, 28), autoSize: true);
             _txtReceiptNo   = new TextBox { Location = new Point(165, 25), Size = new Size(255, 23), MaxLength = 50 };
 
-            var lblBillC    = MakeLabel("ยอดบิล (บาท) :", new Point(12, 60), autoSize: true);
+            var lblBillC    = MakeLabel(
+                _requireProductScreening ? "ยอดที่ร่วมสะสมแต้ม :" : "ยอดบิล (บาท) :",
+                new Point(12, 60), autoSize: true);
             _txtBillAmount  = new TextBox { Location = new Point(165, 57), Size = new Size(255, 23), MaxLength = 12 };
             _txtBillAmount.TextChanged += (s, e) => RecalcPoints();
 
@@ -193,8 +228,70 @@ namespace SCCRMonPOS
             _lblEarned.ForeColor = Color.DarkGreen;
             _lblEarned.Font      = new Font("Tahoma", 10f, FontStyle.Bold);
 
-            _lblStep2Error = MakeLabel("", new Point(12, 132), autoSize: false);
-            _lblStep2Error.Size      = new Size(410, 18);
+            if (_requireProductScreening)
+            {
+                var lblProductC = MakeLabel("สแกนสินค้า :", new Point(12, 136), autoSize: true);
+                _txtProductCode = new TextBox { Location = new Point(165, 133), Size = new Size(165, 23), MaxLength = 100 };
+                _txtProductCode.KeyDown += (s, e) =>
+                {
+                    if (e.KeyCode == Keys.Return)
+                    {
+                        e.SuppressKeyPress = true;
+                        _ = AddProductAsync();
+                    }
+                };
+
+                _btnAddProduct = new Button
+                {
+                    Text = "ตรวจสอบ",
+                    Location = new Point(336, 131),
+                    Size = new Size(84, 27),
+                    UseVisualStyleBackColor = true
+                };
+                _btnAddProduct.Click += async (s, e) => await AddProductAsync();
+
+                _lvProducts = new ListView
+                {
+                    Location = new Point(15, 168),
+                    Size = new Size(405, 118),
+                    View = View.Details,
+                    FullRowSelect = true,
+                    GridLines = true
+                };
+                _lvProducts.Columns.Add("รหัส", 90);
+                _lvProducts.Columns.Add("สินค้า", 205);
+                _lvProducts.Columns.Add("สถานะ", 105);
+
+                _btnClearProducts = new Button
+                {
+                    Text = "ล้างรายการ",
+                    Location = new Point(326, 292),
+                    Size = new Size(94, 27),
+                    UseVisualStyleBackColor = true
+                };
+                _btnClearProducts.Click += (s, e) => ClearScreenedProducts();
+
+                _lblProductSummary = MakeLabel("ยังไม่ได้คัดกรองสินค้า", new Point(15, 326), autoSize: false);
+                _lblProductSummary.Size = new Size(405, 18);
+
+                _chkEligibleSubtotalConfirmed = new CheckBox
+                {
+                    Text = "ยืนยันว่า ยอดข้างต้นไม่รวมยา/สินค้าที่ไม่ร่วมสะสมแต้ม",
+                    Location = new Point(15, 348),
+                    Size = new Size(405, 20),
+                    AutoSize = false
+                };
+
+                grpBill.Controls.AddRange(new Control[]
+                {
+                    lblProductC, _txtProductCode, _btnAddProduct,
+                    _lvProducts, _btnClearProducts, _lblProductSummary,
+                    _chkEligibleSubtotalConfirmed
+                });
+            }
+
+            _lblStep2Error = MakeLabel("", new Point(12, _requireProductScreening ? 352 + 28 : 132), autoSize: false);
+            _lblStep2Error.Size      = new Size(410, 36);
             _lblStep2Error.ForeColor = Color.Crimson;
 
             grpBill.Controls.AddRange(new Control[]
@@ -317,6 +414,7 @@ namespace SCCRMonPOS
             }
 
             _customer              = c;
+            ClearScreenedProducts();
             _lblName.Text          = c.FullName    ?? "—";
             _lblPhone.Text         = c.Phone       ?? "—";
             _lblMemberCode.Text    = c.MemberCode  ?? "—";
@@ -378,6 +476,23 @@ namespace SCCRMonPOS
             _lblS2MemberCode.Text = _customer.MemberCode ?? "—";
             _lblS2Name.Text       = _customer.FullName   ?? "—";
             _lblS2CurPoints.Text  = _customer.Balance.ToString("N0") + " แต้ม";
+            _lblStep2Error.Text   = "";
+
+            // Pre-fill from AdaPos standing-by receipt if available
+            if (_posReceipt != null)
+            {
+                if (string.IsNullOrEmpty(_txtReceiptNo.Text))
+                    _txtReceiptNo.Text = _posReceipt.DocNo;
+
+                if (string.IsNullOrEmpty(_txtBillAmount.Text))
+                    _txtBillAmount.Text = _posReceipt.GrandTotal.ToString("F2");
+
+                // Auto-screen all products from the receipt (only if none screened yet)
+                if (_requireProductScreening && _posReceipt.Items.Count > 0
+                    && _screenedProducts.Count == 0)
+                    _ = PreScreenProductsAsync(_posReceipt.Items);
+            }
+
             RecalcPoints();
         }
 
@@ -413,6 +528,32 @@ namespace SCCRMonPOS
         {
             _lblStep2Error.Text = "";
 
+            if (_requireProductScreening)
+            {
+                if (_productEligibility == null || !_productEligibility.IsConfigured)
+                {
+                    _lblStep2Error.Text = "ยังไม่ได้ตั้งค่าระบบคัดกรองสินค้า จึงยังไม่สามารถสะสมแต้มได้";
+                    return;
+                }
+                if (_screenedProducts.Count == 0)
+                {
+                    _lblStep2Error.Text = "กรุณาคัดกรองสินค้าอย่างน้อย 1 รายการก่อนยืนยัน";
+                    _txtProductCode.Focus();
+                    return;
+                }
+                if (HasUnknownOrUnmatchedProducts())
+                {
+                    _lblStep2Error.Text = "มีสินค้าที่ไม่พบข้อมูลหรือยังไม่จัดประเภท กรุณาตรวจสอบก่อน";
+                    _txtProductCode.Focus();
+                    return;
+                }
+                if (_chkEligibleSubtotalConfirmed != null && !_chkEligibleSubtotalConfirmed.Checked)
+                {
+                    _lblStep2Error.Text = "กรุณายืนยันว่าใช้ยอดเฉพาะสินค้าที่ร่วมสะสมแต้ม";
+                    return;
+                }
+            }
+
             string billText = _txtBillAmount.Text.Trim();
             if (string.IsNullOrEmpty(billText))
             {
@@ -438,7 +579,10 @@ namespace SCCRMonPOS
                 $"ชื่อลูกค้า    :  {_customer.FullName}\n" +
                 $"รหัสสมาชิก  :  {_customer.MemberCode}\n" +
                 (string.IsNullOrEmpty(receiptNo) ? "" : $"ใบเสร็จ        :  {receiptNo}\n") +
-                $"ยอดบิล       :  {bill:N2} บาท\n" +
+                (_requireProductScreening
+                    ? $"ยอดที่ร่วมสะสมแต้ม :  {bill:N2} บาท\n"
+                    : $"ยอดบิล       :  {bill:N2} บาท\n") +
+                (_requireProductScreening ? BuildProductSummaryForConfirm() : "") +
                 $"แต้มที่ได้รับ  :  {earned:N0} แต้ม\n" +
                 $"แต้มรวมใหม่  :  {newTotal:N0} แต้ม";
 
@@ -551,7 +695,9 @@ namespace SCCRMonPOS
                 $"ชื่อลูกค้า    :  {_customer.FullName}\n" +
                 $"รหัสสมาชิก  :  {_customer.MemberCode}\n" +
                 (string.IsNullOrEmpty(receiptNo) ? "" : $"ใบเสร็จ        :  {receiptNo}\n") +
-                $"ยอดบิล       :  {bill:N2} บาท\n" +
+                (_requireProductScreening
+                    ? $"ยอดที่ร่วมสะสมแต้ม :  {bill:N2} บาท\n"
+                    : $"ยอดบิล       :  {bill:N2} บาท\n") +
                 $"แต้มที่ได้รับ  :  {result.PointsAwarded:N0} แต้ม\n" +
                 $"แต้มรวมใหม่  :  {result.Balance:N0} แต้ม\n\n" +
                 $"[{result.TransactionId}]";
@@ -588,6 +734,196 @@ namespace SCCRMonPOS
         {
             string raw = ConfigurationManager.AppSettings[key];
             return decimal.TryParse(raw, out decimal v) ? v : defaultValue;
+        }
+
+        // codeOverride: when called from PreScreenProductsAsync, pass the barcode/product code
+        // directly instead of reading from the text box. UI feedback is suppressed in that mode.
+        private async Task AddProductAsync(string codeOverride = null)
+        {
+            if (!_requireProductScreening) return;
+
+            bool fromReceipt = codeOverride != null;
+            string code = fromReceipt ? codeOverride.Trim() : (_txtProductCode?.Text ?? "").Trim();
+
+            if (string.IsNullOrEmpty(code))
+            {
+                if (!fromReceipt) _lblStep2Error.Text = "กรุณาสแกนหรือกรอกรหัสสินค้า";
+                return;
+            }
+
+            if (_productEligibility == null || !_productEligibility.IsConfigured)
+            {
+                if (!fromReceipt) _lblStep2Error.Text = "ยังไม่ได้ตั้งค่าระบบคัดกรองสินค้า";
+                return;
+            }
+
+            _lblStep2Error.Text = "";
+            if (!fromReceipt) ToggleProductLookup(false);
+            try
+            {
+                ProductEligibilityResult result = await _productEligibility.LookupAsync(code);
+                var screened = new ScreenedProduct
+                {
+                    LookupCode   = code,
+                    DisplayName  = result.DisplayName,
+                    ProductKind  = result.ProductKind,
+                    CategoryName = result.CategoryName,
+                    Eligible     = result.Eligible,
+                    StatusText   = GetStatusText(result),
+                    IsResolvable = !string.IsNullOrEmpty(result.ProductKind),
+                };
+
+                _screenedProducts.Add(screened);
+                var item = new ListViewItem(screened.LookupCode);
+                item.SubItems.Add(screened.DisplayName ?? "-");
+                item.SubItems.Add(screened.StatusText);
+                item.ForeColor = screened.Eligible ? Color.DarkGreen : Color.Firebrick;
+                _lvProducts.Items.Add(item);
+
+                if (!fromReceipt) { _txtProductCode.Clear(); _txtProductCode.Focus(); }
+                UpdateProductSummary();
+            }
+            catch (ProductEligibilityNotFoundException ex)
+            {
+                AddUnresolvedProduct(code, ex.Message);
+            }
+            catch (ProductEligibilityLookupException ex)
+            {
+                if (!fromReceipt) _lblStep2Error.Text = ex.Message;
+            }
+            finally
+            {
+                if (!fromReceipt) ToggleProductLookup(true);
+            }
+        }
+
+        // Auto-screens every item from the AdaPos receipt without cashier interaction.
+        private async Task PreScreenProductsAsync(IList<PosReceiptItem> items)
+        {
+            if (!_requireProductScreening
+                || _productEligibility == null
+                || !_productEligibility.IsConfigured) return;
+
+            ToggleProductLookup(false);
+            try
+            {
+                foreach (PosReceiptItem item in items)
+                {
+                    // Prefer barcode; fall back to product code
+                    string code = !string.IsNullOrWhiteSpace(item.Barcode)
+                        ? item.Barcode
+                        : item.ProductCode;
+                    if (!string.IsNullOrWhiteSpace(code))
+                        await AddProductAsync(code);
+                }
+            }
+            finally
+            {
+                ToggleProductLookup(true);
+            }
+        }
+
+        private void AddUnresolvedProduct(string code, string reason)
+        {
+            var screened = new ScreenedProduct
+            {
+                LookupCode = code,
+                DisplayName = "-",
+                ProductKind = "",
+                CategoryName = "",
+                Eligible = false,
+                StatusText = reason,
+                IsResolvable = false,
+            };
+
+            _screenedProducts.Add(screened);
+            var item = new ListViewItem(screened.LookupCode);
+            item.SubItems.Add("-");
+            item.SubItems.Add(screened.StatusText);
+            item.ForeColor = Color.Firebrick;
+            _lvProducts.Items.Add(item);
+            _txtProductCode.Clear();
+            _txtProductCode.Focus();
+            UpdateProductSummary();
+        }
+
+        private void ClearScreenedProducts()
+        {
+            _screenedProducts.Clear();
+            if (_lvProducts != null) _lvProducts.Items.Clear();
+            if (_chkEligibleSubtotalConfirmed != null) _chkEligibleSubtotalConfirmed.Checked = false;
+            UpdateProductSummary();
+            _txtProductCode?.Focus();
+        }
+
+        private void UpdateProductSummary()
+        {
+            if (!_requireProductScreening || _lblProductSummary == null) return;
+
+            int eligible = 0, blocked = 0, unresolved = 0;
+            foreach (ScreenedProduct product in _screenedProducts)
+            {
+                if (!product.IsResolvable) unresolved++;
+                else if (product.Eligible) eligible++;
+                else blocked++;
+            }
+
+            _lblProductSummary.Text =
+                $"คัดกรองแล้ว { _screenedProducts.Count:N0} รายการ | ร่วมสะสมแต้ม {eligible:N0} | ไม่ร่วม {blocked:N0} | ต้องตรวจสอบ {unresolved:N0}";
+        }
+
+        private bool HasUnknownOrUnmatchedProducts()
+        {
+            foreach (ScreenedProduct product in _screenedProducts)
+            {
+                if (!product.IsResolvable) return true;
+            }
+            return false;
+        }
+
+        private string BuildProductSummaryForConfirm()
+        {
+            int eligible = 0, blocked = 0;
+            foreach (ScreenedProduct product in _screenedProducts)
+            {
+                if (product.Eligible) eligible++;
+                else blocked++;
+            }
+
+            return
+                $"สินค้าที่ร่วมสะสมแต้ม :  {eligible:N0} รายการ\n" +
+                $"สินค้าที่ไม่ร่วมสะสมแต้ม :  {blocked:N0} รายการ\n";
+        }
+
+        private void ToggleProductLookup(bool enabled)
+        {
+            if (_txtProductCode != null) _txtProductCode.Enabled = enabled;
+            if (_btnAddProduct != null) _btnAddProduct.Enabled = enabled;
+            if (_btnClearProducts != null) _btnClearProducts.Enabled = enabled;
+            _btnNext.Enabled = enabled;
+            _btnBack.Enabled = enabled;
+        }
+
+        private static string GetStatusText(ProductEligibilityResult result)
+        {
+            if (result == null) return "ไม่พบข้อมูล";
+            if (result.Eligible) return "ร่วมสะสมแต้ม";
+            if (string.Equals(result.Reason, "medicine_blocked", StringComparison.OrdinalIgnoreCase))
+                return "ยา - ไม่ร่วมสะสม";
+            if (string.Equals(result.Reason, "unknown_product_kind", StringComparison.OrdinalIgnoreCase))
+                return "ยังไม่จัดประเภท";
+            return "ไม่ร่วมสะสม";
+        }
+
+        private sealed class ScreenedProduct
+        {
+            public string LookupCode { get; set; }
+            public string DisplayName { get; set; }
+            public string ProductKind { get; set; }
+            public string CategoryName { get; set; }
+            public bool Eligible { get; set; }
+            public bool IsResolvable { get; set; }
+            public string StatusText { get; set; }
         }
     }
 }
