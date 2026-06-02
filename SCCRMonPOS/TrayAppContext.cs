@@ -1,9 +1,11 @@
 using System;
 using System.Configuration;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using SCCRMonPOS.Models;
 
 namespace SCCRMonPOS
 {
@@ -31,14 +33,23 @@ namespace SCCRMonPOS
         private TransactionRepository _txRepo;
         private OfflineQueue          _offlineQueue;
         private readonly bool _requireProductScreening;
+        private readonly bool _claimQrEnabled;
+        private readonly string _claimQrInternalToken;
+        private readonly string _claimQrPayloadPrefix;
+        private readonly int _claimQrDisplaySeconds;
+        private readonly int _claimQrLookupAttempts;
+        private readonly int _claimQrLookupDelayMs;
 
         // Only one member-point popup may be open at a time
         private MemberPointForm _activeForm;
+        private ClaimQrForm _activeClaimQrForm;
 
         // Most-recently completed AdaPos receipt, waiting for a CRM barcode scan.
         // Written from the watcher background thread; read on the UI thread — guarded by _receiptLock.
         private PosReceipt        _standingByReceipt;
         private readonly object   _receiptLock = new object();
+        private readonly object   _claimQrLock = new object();
+        private readonly HashSet<string> _claimQrPendingDocs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Tray menu items
         private ToolStripMenuItem _miSyncPending;
@@ -60,6 +71,12 @@ namespace SCCRMonPOS
             _txRepo                  = new TransactionRepository(_dataFolder);
             _offlineQueue            = new OfflineQueue(_dataFolder);
             _requireProductScreening = ReadBool("RequireProductScreeningForPoints", true);
+            _claimQrEnabled          = ReadBool("ClaimQrEnabled", true);
+            _claimQrInternalToken    = ConfigurationManager.AppSettings["ClaimQrInternalToken"] ?? "";
+            _claimQrPayloadPrefix    = ConfigurationManager.AppSettings["ClaimQrPayloadPrefix"] ?? "SCM-CLAIM-v1-";
+            _claimQrDisplaySeconds   = ReadInt("ClaimQrDisplaySeconds", 45);
+            _claimQrLookupAttempts   = ReadInt("ClaimQrLookupAttempts", 12);
+            _claimQrLookupDelayMs    = ReadInt("ClaimQrLookupDelayMs", 5000);
 
             if (_auth.HasToken)
                 _api.SetStaffToken(_auth.StaffToken);
@@ -178,6 +195,9 @@ namespace SCCRMonPOS
         {
             lock (_receiptLock)
                 _standingByReceipt = receipt;
+
+            if (_claimQrEnabled)
+                _ = TryShowClaimQrAsync(receipt);
         }
 
         private void OnReturnDetected(object sender, PosReceipt receipt)
@@ -185,6 +205,12 @@ namespace SCCRMonPOS
             // Overwrite standing-by with the return so it doesn't trigger loyalty on a refund
             lock (_receiptLock)
                 _standingByReceipt = null;
+
+            ScheduleOnUiThread(() =>
+            {
+                if (_activeClaimQrForm != null && !_activeClaimQrForm.IsDisposed)
+                    _activeClaimQrForm.Close();
+            });
 
             ScheduleOnUiThread(() =>
                 _trayIcon.ShowBalloonTip(4000, "SCCRM — คืนสินค้า",
@@ -386,6 +412,79 @@ namespace SCCRMonPOS
             _activeForm.BringToFront();
         }
 
+        private async Task TryShowClaimQrAsync(PosReceipt receipt)
+        {
+            if (receipt == null || receipt.IsReturn) return;
+            if (string.IsNullOrWhiteSpace(_claimQrInternalToken)) return;
+
+            string docKey = (receipt.BranchCode ?? "") + "|" + (receipt.DocNo ?? "");
+            lock (_claimQrLock)
+            {
+                if (_claimQrPendingDocs.Contains(docKey))
+                    return;
+                _claimQrPendingDocs.Add(docKey);
+            }
+
+            try
+            {
+                for (int attempt = 0; attempt < Math.Max(1, _claimQrLookupAttempts); attempt++)
+                {
+                    try
+                    {
+                        ClaimTokenApiResult result = await _api.CreateSaleClaimTokenAsync(
+                            receipt.BranchCode, receipt.DocNo, _claimQrInternalToken);
+
+                        string claimPayload = (_claimQrPayloadPrefix ?? "SCM-CLAIM-v1-") + result.ClaimToken;
+                        ScheduleOnUiThread(() => ShowClaimQrForm(receipt, claimPayload, result.ExpiresAt));
+                        return;
+                    }
+                    catch (NetworkApiException)
+                    {
+                        if (attempt >= _claimQrLookupAttempts - 1)
+                            return;
+                    }
+                    catch (ApiException ex)
+                    {
+                        bool retryable = ex.Message.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || ex.Message.IndexOf("ไม่พบ", StringComparison.OrdinalIgnoreCase) >= 0
+                                      || ex.Message.IndexOf("Sale event", StringComparison.OrdinalIgnoreCase) >= 0;
+                        bool alreadyClaimed = ex.Message.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                        if (alreadyClaimed)
+                            return;
+
+                        if (!retryable || attempt >= _claimQrLookupAttempts - 1)
+                            return;
+                    }
+
+                    await Task.Delay(Math.Max(500, _claimQrLookupDelayMs));
+                }
+            }
+            finally
+            {
+                lock (_claimQrLock)
+                    _claimQrPendingDocs.Remove(docKey);
+            }
+        }
+
+        private void ShowClaimQrForm(PosReceipt receipt, string claimPayload, DateTime? expiresAt)
+        {
+            if (_activeClaimQrForm != null && !_activeClaimQrForm.IsDisposed)
+            {
+                _activeClaimQrForm.Close();
+                _activeClaimQrForm = null;
+            }
+
+            _activeClaimQrForm = new ClaimQrForm(
+                receipt,
+                claimPayload,
+                expiresAt,
+                _claimQrDisplaySeconds);
+            _activeClaimQrForm.FormClosed += (s, e) => _activeClaimQrForm = null;
+            _activeClaimQrForm.Show();
+            _activeClaimQrForm.BringToFront();
+        }
+
         private static void ScheduleOnUiThread(Action action)
         {
             var t = new Timer { Interval = 1 };
@@ -403,6 +502,13 @@ namespace SCCRMonPOS
             string raw = ConfigurationManager.AppSettings[key];
             bool parsed;
             return bool.TryParse(raw, out parsed) ? parsed : defaultValue;
+        }
+
+        private static int ReadInt(string key, int defaultValue)
+        {
+            string raw = ConfigurationManager.AppSettings[key];
+            int parsed;
+            return int.TryParse(raw, out parsed) ? parsed : defaultValue;
         }
 
         private static Icon BuildTrayIcon()
@@ -429,6 +535,7 @@ namespace SCCRMonPOS
                 _scanner?.Dispose();
                 _watcher?.Dispose();
                 _trayIcon?.Dispose();
+                _activeClaimQrForm?.Dispose();
             }
             base.Dispose(disposing);
         }

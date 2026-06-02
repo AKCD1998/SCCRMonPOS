@@ -60,6 +60,7 @@
   <ItemGroup>
     <Compile Include="AdaPosWatcher.cs" />
     <Compile Include="ApiClient.cs" />
+    <Compile Include="ClaimQrForm.cs" />
     <Compile Include="ProductEligibilityClient.cs" />
     <Compile Include="OfflineQueue.cs" />
     <Compile Include="StaffAuthManager.cs" />

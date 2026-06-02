@@ -36,6 +36,12 @@ namespace SCCRMonPOS
         public string Tier           { get; set; }
     }
 
+    public class ClaimTokenApiResult
+    {
+        public string ClaimToken { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+    }
+
     // ── Exceptions ──────────────────────────────────────────────────────────────
 
     public class ApiException : Exception
@@ -183,6 +189,33 @@ namespace SCCRMonPOS
             };
         }
 
+        public async Task<ClaimTokenApiResult> CreateSaleClaimTokenAsync(
+            string branchCode, string docNo, string internalToken)
+        {
+            if (string.IsNullOrWhiteSpace(branchCode))
+                throw new ApiException("branchCode is required.");
+            if (string.IsNullOrWhiteSpace(docNo))
+                throw new ApiException("docNo is required.");
+            if (string.IsNullOrWhiteSpace(internalToken))
+                throw new ApiException("Claim QR internal token is not configured.");
+
+            string body =
+                "{\"branch_code\":" + JsonStr(branchCode) + "," +
+                "\"doc_no\":"      + JsonStr(docNo)      + "}";
+
+            string json = await PostJsonWithInternalTokenAsync(
+                "/internal/crm/pos/claim-token", body, internalToken.Trim());
+            var dto = Deserialize<ClaimTokenDto>(json);
+            if (string.IsNullOrWhiteSpace(dto?.ClaimToken))
+                throw new ApiException("เซิร์ฟเวอร์ไม่ส่ง claim token กลับมา");
+
+            return new ClaimTokenApiResult
+            {
+                ClaimToken = dto.ClaimToken,
+                ExpiresAt  = ParseDateTimeOrNull(dto.ExpiresAt),
+            };
+        }
+
         // ── Internal DTOs (private — consumers use ApiCustomer / EarnApiResult) ──
 
         [DataContract]
@@ -217,6 +250,13 @@ namespace SCCRMonPOS
             [DataMember(Name = "pointsAwarded")]  public int    PointsAwarded  { get; set; }
             [DataMember(Name = "balance")]        public int    Balance        { get; set; }
             [DataMember(Name = "tier")]           public string Tier           { get; set; }
+        }
+
+        [DataContract]
+        private sealed class ClaimTokenDto
+        {
+            [DataMember(Name = "claim_token")] public string ClaimToken { get; set; }
+            [DataMember(Name = "expires_at")]  public string ExpiresAt  { get; set; }
         }
 
         [DataContract]
@@ -276,6 +316,19 @@ namespace SCCRMonPOS
                 };
                 if (!string.IsNullOrEmpty(token))
                     req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                return req;
+            });
+        }
+
+        private Task<string> PostJsonWithInternalTokenAsync(string path, string jsonBody, string internalToken)
+        {
+            return SendWithRetryAsync(() =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Post, _baseUrl + path)
+                {
+                    Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
+                };
+                req.Headers.Add("x-internal-token", internalToken);
                 return req;
             });
         }
@@ -356,6 +409,21 @@ namespace SCCRMonPOS
                 return string.IsNullOrEmpty(dto?.Error) ? null : dto.Error;
             }
             catch { return null; }
+        }
+
+        private static DateTime? ParseDateTimeOrNull(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            DateTime parsed;
+            if (DateTime.TryParse(
+                raw,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                out parsed))
+            {
+                return parsed;
+            }
+            return null;
         }
 
         /// <summary>Returns a JSON string literal (with surrounding quotes) for value.</summary>
