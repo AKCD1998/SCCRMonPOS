@@ -49,6 +49,7 @@ namespace SCCRMonPOS
                           ?? "https://sc-official-website.onrender.com";
 
             _api                      = new ApiClient(baseUrl);
+            _api.SetPosApiKey(ConfigurationManager.AppSettings["PosApiKey"] ?? "");
             _auth                     = new StaffAuthManager(_dataFolder);
             _watermarkStore           = new ReceiptWatermarkStore(_dataFolder);
             _watcherDiagnosticsEnabled = ReadBool("WatcherDiagnosticsEnabled", true);

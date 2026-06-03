@@ -100,6 +100,8 @@ namespace SCCRMonPOS
     {
         public string Id            { get; set; }
         public string DisplayName   { get; set; }
+        public string FirstName     { get; set; }
+        public string LastName      { get; set; }
         public string Phone         { get; set; }
         public string Email         { get; set; }
         public string MemberCode    { get; set; }
@@ -107,6 +109,7 @@ namespace SCCRMonPOS
         public string Sex           { get; set; }
         public string Dob           { get; set; }
         public string Remark        { get; set; }
+        public string ThaiId        { get; set; }
     }
 
     // ── Exceptions ──────────────────────────────────────────────────────────────
@@ -163,6 +166,7 @@ namespace SCCRMonPOS
 
         private readonly string _baseUrl;
         private          string _staffToken;
+        private          string _posApiKey;
 
         public ApiClient(string baseUrl)
         {
@@ -172,6 +176,11 @@ namespace SCCRMonPOS
         public void SetStaffToken(string token)
         {
             _staffToken = token;
+        }
+
+        public void SetPosApiKey(string key)
+        {
+            _posApiKey = key;
         }
 
         /// <summary>
@@ -301,16 +310,8 @@ namespace SCCRMonPOS
         {
             RequireValidToken();
             if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
-            string json;
-            try
-            {
-                json = await GetJsonAsync("/api/members/" + Uri.EscapeDataString(memberId), _staffToken);
-            }
-            catch (ApiException ex) when (IsMissingMemberEditRoute(ex))
-            {
-                throw new ApiException("ระบบหลังบ้านยังไม่เปิดใช้งานการโหลดข้อมูลสมาชิกสำหรับแก้ไข");
-            }
-            return ParseMemberDetail(json);
+            string json = await GetJsonWithPosKeyAsync("/api/members/" + Uri.EscapeDataString(memberId));
+            return ParseMemberFromApiResponse(json);
         }
 
         public async Task<MemberSearchResult> UpdateMemberAsync(string memberId, CreateMemberRequest request)
@@ -329,20 +330,9 @@ namespace SCCRMonPOS
             sb.Append("\"remark\":").Append(JsonStr(request.Remark));
             sb.Append('}');
 
-            string json;
-            try
-            {
-                json = await PutJsonAsync("/api/members/" + Uri.EscapeDataString(memberId), sb.ToString(), _staffToken);
-            }
-            catch (ApiException ex) when (IsMissingMemberEditRoute(ex))
-            {
-                throw new ApiException("ระบบหลังบ้านยังไม่เปิดใช้งานการแก้ไขข้อมูลสมาชิก");
-            }
-            var single = ParseSingleMember(json);
-            if (single != null) return single;
-            var arr = ParseMemberSearchResults(json);
-            if (arr != null && arr.Length > 0) return arr[0];
-            throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+            string json = await PutJsonWithPosKeyAsync(
+                "/api/members/" + Uri.EscapeDataString(memberId), sb.ToString());
+            return ParseMemberSearchResultFromApiResponse(json);
         }
 
         public async Task<MemberSearchResult> CreateMemberAsync(CreateMemberRequest request)
@@ -427,15 +417,30 @@ namespace SCCRMonPOS
 
         [DataContract] private sealed class MemberDetailDto
         {
-            [DataMember(Name = "id")]            public string Id            { get; set; }
-            [DataMember(Name = "displayName")]   public string DisplayName   { get; set; }
-            [DataMember(Name = "phone")]         public string Phone         { get; set; }
-            [DataMember(Name = "email")]         public string Email         { get; set; }
-            [DataMember(Name = "memberCode")]    public string MemberCode    { get; set; }
-            [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
-            [DataMember(Name = "sex")]           public string Sex           { get; set; }
-            [DataMember(Name = "dob")]           public string Dob           { get; set; }
-            [DataMember(Name = "remark")]        public string Remark        { get; set; }
+            [DataMember(Name = "id")]             public string Id            { get; set; }
+            [DataMember(Name = "display_name")]   public string DisplayName   { get; set; }
+            [DataMember(Name = "displayName")]    public string DisplayNameCC { get; set; }
+            [DataMember(Name = "first_name")]     public string FirstName     { get; set; }
+            [DataMember(Name = "last_name")]      public string LastName      { get; set; }
+            [DataMember(Name = "phone")]          public string Phone         { get; set; }
+            [DataMember(Name = "email")]          public string Email         { get; set; }
+            [DataMember(Name = "member_code")]    public string MemberCode    { get; set; }
+            [DataMember(Name = "memberCode")]     public string MemberCodeCC  { get; set; }
+            [DataMember(Name = "current_points")] public int    CurrentPoints { get; set; }
+            [DataMember(Name = "currentPoints")]  public int    CurrentPointsCC { get; set; }
+            [DataMember(Name = "sex")]            public string Sex           { get; set; }
+            [DataMember(Name = "dob")]            public string Dob           { get; set; }
+            [DataMember(Name = "remark")]         public string Remark        { get; set; }
+            [DataMember(Name = "thai_id")]        public string ThaiId        { get; set; }
+            [DataMember(Name = "created_at")]     public string CreatedAt     { get; set; }
+            [DataMember(Name = "updated_at")]     public string UpdatedAt     { get; set; }
+        }
+
+        [DataContract] private sealed class MemberApiResponseDto
+        {
+            [DataMember(Name = "ok")]         public bool          Ok        { get; set; }
+            [DataMember(Name = "request_id")] public string        RequestId { get; set; }
+            [DataMember(Name = "member")]     public MemberDetailDto Member  { get; set; }
         }
 
         private static MemberDetail ParseMemberDetail(string json)
@@ -444,20 +449,74 @@ namespace SCCRMonPOS
             {
                 var dto = Deserialize<MemberDetailDto>(json);
                 if (dto == null) return null;
-                return new MemberDetail
-                {
-                    Id            = dto.Id,
-                    DisplayName   = dto.DisplayName,
-                    Phone         = dto.Phone,
-                    Email         = dto.Email,
-                    MemberCode    = dto.MemberCode,
-                    CurrentPoints = dto.CurrentPoints,
-                    Sex           = dto.Sex,
-                    Dob           = dto.Dob,
-                    Remark        = dto.Remark
-                };
+                return MapMemberDetailDto(dto);
             }
             catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static MemberDetail ParseMemberFromApiResponse(string json)
+        {
+            try
+            {
+                var wrapped = Deserialize<MemberApiResponseDto>(json);
+                if (wrapped?.Member != null) return MapMemberDetailDto(wrapped.Member);
+                var dto = Deserialize<MemberDetailDto>(json);
+                if (dto != null) return MapMemberDetailDto(dto);
+                return null;
+            }
+            catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static MemberSearchResult ParseMemberSearchResultFromApiResponse(string json)
+        {
+            try
+            {
+                var wrapped = Deserialize<MemberApiResponseDto>(json);
+                if (wrapped?.Member != null) return MapMemberSearchResult(wrapped.Member);
+                var single = ParseSingleMember(json);
+                if (single != null) return single;
+                var arr = ParseMemberSearchResults(json);
+                if (arr != null && arr.Length > 0) return arr[0];
+                throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+            }
+            catch (ApiException) { throw; }
+            catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static MemberDetail MapMemberDetailDto(MemberDetailDto m)
+        {
+            string display = m.DisplayName ?? m.DisplayNameCC
+                             ?? ((m.FirstName ?? "") + " " + (m.LastName ?? "")).Trim();
+            return new MemberDetail
+            {
+                Id            = m.Id,
+                DisplayName   = display,
+                FirstName     = m.FirstName,
+                LastName      = m.LastName,
+                Phone         = m.Phone,
+                Email         = m.Email,
+                MemberCode    = m.MemberCode ?? m.MemberCodeCC,
+                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
+                Sex           = m.Sex,
+                Dob           = m.Dob,
+                Remark        = m.Remark,
+                ThaiId        = m.ThaiId
+            };
+        }
+
+        private static MemberSearchResult MapMemberSearchResult(MemberDetailDto m)
+        {
+            string display = m.DisplayName ?? m.DisplayNameCC
+                             ?? ((m.FirstName ?? "") + " " + (m.LastName ?? "")).Trim();
+            return new MemberSearchResult
+            {
+                Id            = m.Id,
+                DisplayName   = display,
+                Phone         = m.Phone,
+                Email         = m.Email,
+                MemberCode    = m.MemberCode ?? m.MemberCodeCC,
+                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC
+            };
         }
 
         private static MemberSearchResult ParseSingleMember(string json)
@@ -672,6 +731,31 @@ namespace SCCRMonPOS
             });
         }
 
+        private Task<string> GetJsonWithPosKeyAsync(string path)
+        {
+            return SendWithRetryAsync(() =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, _baseUrl + path);
+                if (!string.IsNullOrEmpty(_posApiKey))
+                    req.Headers.Add("x-pos-api-key", _posApiKey);
+                return req;
+            });
+        }
+
+        private Task<string> PutJsonWithPosKeyAsync(string path, string jsonBody)
+        {
+            return SendWithRetryAsync(() =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Put, _baseUrl + path)
+                {
+                    Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_posApiKey))
+                    req.Headers.Add("x-pos-api-key", _posApiKey);
+                return req;
+            });
+        }
+
         private Task<string> PostJsonWithInternalTokenAsync(string path, string jsonBody, string internalToken)
         {
             return SendWithRetryAsync(() =>
@@ -763,16 +847,6 @@ namespace SCCRMonPOS
             catch { return null; }
         }
 
-        private static bool IsMissingMemberEditRoute(ApiException ex)
-        {
-            if (ex == null || string.IsNullOrWhiteSpace(ex.Message))
-                return false;
-
-            string msg = ex.Message;
-            return msg.IndexOf("Cannot GET /api/members/", StringComparison.OrdinalIgnoreCase) >= 0
-                || msg.IndexOf("Cannot PUT /api/members/", StringComparison.OrdinalIgnoreCase) >= 0
-                || msg.IndexOf("HTTP 404", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
 
         private static DateTime? ParseDateTimeOrNull(string raw)
         {
