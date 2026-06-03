@@ -427,38 +427,29 @@ namespace SCCRMonPOS
 
             try
             {
-                for (int attempt = 0; attempt < Math.Max(1, _claimQrLookupAttempts); attempt++)
+                // Step 1: push the sale to the backend so claim-token can find it immediately
+                await _api.RegisterSaleEventAsync(receipt, _claimQrInternalToken);
+
+                // Step 2: claim the token — sale is guaranteed to exist now
+                try
                 {
-                    try
-                    {
-                        ClaimTokenApiResult result = await _api.CreateSaleClaimTokenAsync(
-                            receipt.BranchCode, receipt.DocNo, _claimQrInternalToken);
+                    ClaimTokenApiResult result = await _api.CreateSaleClaimTokenAsync(
+                        receipt.BranchCode, receipt.DocNo, _claimQrInternalToken);
 
-                        string claimPayload = (_claimQrPayloadPrefix ?? "SCM-CLAIM-v1-") + result.ClaimToken;
-                        ScheduleOnUiThread(() => ShowClaimQrForm(receipt, claimPayload, result.ExpiresAt));
-                        return;
-                    }
-                    catch (NetworkApiException)
-                    {
-                        if (attempt >= _claimQrLookupAttempts - 1)
-                            return;
-                    }
-                    catch (ApiException ex)
-                    {
-                        bool retryable = ex.Message.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || ex.Message.IndexOf("ไม่พบ", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || ex.Message.IndexOf("Sale event", StringComparison.OrdinalIgnoreCase) >= 0;
-                        bool alreadyClaimed = ex.Message.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                        if (alreadyClaimed)
-                            return;
-
-                        if (!retryable || attempt >= _claimQrLookupAttempts - 1)
-                            return;
-                    }
-
-                    await Task.Delay(Math.Max(500, _claimQrLookupDelayMs));
+                    string claimPayload = (_claimQrPayloadPrefix ?? "SCM-CLAIM-v1-") + result.ClaimToken;
+                    ScheduleOnUiThread(() => ShowClaimQrForm(receipt, claimPayload, result.ExpiresAt));
                 }
+                catch (ApiException ex)
+                {
+                    // 409 already claimed on a previous attempt — not an error
+                    if (ex.Message.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return;
+                    // Other backend/network errors — skip QR silently for this receipt
+                }
+            }
+            catch (ApiException)
+            {
+                // RegisterSaleEvent failed (network down, auth error) — skip QR silently
             }
             finally
             {

@@ -9,6 +9,7 @@ using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using SCCRMonPOS.Models;
 
 namespace SCCRMonPOS
 {
@@ -214,6 +215,45 @@ namespace SCCRMonPOS
                 ClaimToken = dto.ClaimToken,
                 ExpiresAt  = ParseDateTimeOrNull(dto.ExpiresAt),
             };
+        }
+
+        public async Task RegisterSaleEventAsync(PosReceipt receipt, string internalToken)
+        {
+            if (string.IsNullOrWhiteSpace(internalToken))
+                throw new ApiException("Claim QR internal token is not configured.");
+
+            string insertedAt =
+                receipt.InsertDate.ToString("yyyy-MM-dd") + "T" +
+                (string.IsNullOrEmpty(receipt.InsertTime) ? "00:00:00" : receipt.InsertTime) +
+                "+07:00";
+
+            string grandTotal = receipt.GrandTotal.ToString("F2", CultureInfo.InvariantCulture);
+
+            var items = new StringBuilder("[");
+            for (int i = 0; i < receipt.Items.Count; i++)
+            {
+                if (i > 0) items.Append(',');
+                var it = receipt.Items[i];
+                items.Append('{');
+                items.Append("\"product_code\":" + JsonStr(it.ProductCode) + ",");
+                items.Append("\"qty\":"          + it.Qty.ToString("F2", CultureInfo.InvariantCulture) + ",");
+                items.Append("\"net_amt\":"      + it.NetAmount.ToString("F2", CultureInfo.InvariantCulture));
+                items.Append('}');
+            }
+            items.Append(']');
+
+            string body =
+                "{\"branch_code\":"  + JsonStr(receipt.BranchCode)  + "," +
+                "\"doc_no\":"        + JsonStr(receipt.DocNo)        + "," +
+                "\"pos_code\":"      + JsonStr(receipt.PosCode)      + "," +
+                "\"grand_total\":"   + grandTotal                    + "," +
+                "\"tender_code\":"   + JsonStr(receipt.PaymentCode)  + "," +
+                "\"tender_ref\":"    + JsonStr(receipt.PromptPayRef) + "," +
+                "\"inserted_at\":"   + JsonStr(insertedAt)           + "," +
+                "\"items\":"         + items                         + "}";
+
+            await PostJsonWithInternalTokenAsync(
+                "/internal/crm/pos/sale-event", body, internalToken.Trim());
         }
 
         // ── Internal DTOs (private — consumers use ApiCustomer / EarnApiResult) ──

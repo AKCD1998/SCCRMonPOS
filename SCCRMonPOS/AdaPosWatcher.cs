@@ -164,7 +164,25 @@ namespace SCCRMonPOS
                        h.FCShdGrand,    h.FCShdDis,
                        h.FCShdMnyCsh,   h.FCShdChn,
                        h.FTShdStaRefund, h.FTShdPosCN
-                FROM   TPSTSalHD h
+                FROM (
+                    SELECT FTShdDocNo, FTShdDocType, FTBchCode,
+                           FTPosCode, FTUsrCode,
+                           FDShdDocDate, FTShdDocTime,
+                           FDDateIns, FTTimeIns,
+                           FCShdGrand, FCShdDis,
+                           FCShdMnyCsh, FCShdChn,
+                           FTShdStaRefund, FTShdPosCN
+                    FROM   TSHD001
+                    UNION ALL
+                    SELECT FTShdDocNo, FTShdDocType, FTBchCode,
+                           FTPosCode, FTUsrCode,
+                           FDShdDocDate, FTShdDocTime,
+                           FDDateIns, FTTimeIns,
+                           FCShdGrand, FCShdDis,
+                           FCShdMnyCsh, FCShdChn,
+                           FTShdStaRefund, FTShdPosCN
+                    FROM   TSHD002
+                ) AS h
                 WHERE  (h.FDDateIns  > @ld)
                    OR  (h.FDDateIns  = @ld AND h.FTTimeIns > @lt)
                 ORDER BY h.FDDateIns, h.FTTimeIns";
@@ -208,11 +226,12 @@ namespace SCCRMonPOS
 
         private static void FetchLineItems(SqlConnection conn, PosReceipt receipt)
         {
-            const string sql = @"
+            string detailTable = receipt.PosCode == "002" ? "TSDT002" : "TSDT001";
+            string sql = @"
                 SELECT d.FNSdtSeqNo,   d.FTPdtCode,    d.FTPdtName,
                        d.FTSdtBarCode, d.FCSdtQty,     d.FCSdtSetPrice,
                        d.FCSdtNet,     d.FCSdtDis,     d.FTPmhCode
-                FROM   TPSTSalDT d
+                FROM   " + detailTable + @" d
                 WHERE  d.FTShdDocNo = @docNo
                 ORDER BY d.FNSdtSeqNo";
 
@@ -244,9 +263,10 @@ namespace SCCRMonPOS
 
         private static void FetchPayment(SqlConnection conn, PosReceipt receipt)
         {
-            const string sql = @"
+            string rcTable = receipt.PosCode == "002" ? "TSRC002" : "TSRC001";
+            string sql = @"
                 SELECT TOP 1 FTRcvCode, FTRcvName, FTSrcRef
-                FROM   TPSTSalRC
+                FROM   " + rcTable + @"
                 WHERE  FTShdDocNo = @docNo
                 ORDER BY FNSrcSeqNo";
 
