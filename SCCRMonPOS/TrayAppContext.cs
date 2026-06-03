@@ -233,6 +233,8 @@ namespace SCCRMonPOS
         {
             if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed)
             {
+                if (_activeMemberClaimForm.WindowState == FormWindowState.Minimized)
+                    _activeMemberClaimForm.WindowState = FormWindowState.Normal;
                 _activeMemberClaimForm.BringToFront();
                 _activeMemberClaimForm.Activate();
                 return;
