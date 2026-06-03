@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
+using QRCoder;
 using SCCRMonPOS.Models;
 
 namespace SCCRMonPOS
@@ -13,13 +14,16 @@ namespace SCCRMonPOS
         private int             _secondsLeft;
         private Label           _countdownLabel;
         private Label           _qrErrorLabel;
+        private readonly Screen _targetScreen;
 
         public ClaimQrForm(
             PosReceipt receipt,
             string claimPayload,
             DateTime? expiresAtUtc,
-            int displaySeconds)
+            int displaySeconds,
+            Screen targetScreen = null)
         {
+            _targetScreen = targetScreen ?? Screen.PrimaryScreen;
             SuspendLayout();
 
             Text            = "SCCRM — Loyalty Claim";
@@ -74,17 +78,15 @@ namespace SCCRMonPOS
                 BackColor = Color.FromArgb(255, 245, 245)
             };
 
-            string qrUrl = BuildQrImageUrl(claimPayload);
-            qrBox.LoadCompleted += (s, e) =>
+            try
             {
-                if (e.Error != null || qrBox.Image == null)
-                {
-                    qrBox.Visible       = false;
-                    _qrErrorLabel.Visible = true;
-                }
-            };
-            try { qrBox.LoadAsync(qrUrl); }
-            catch { qrBox.Visible = false; _qrErrorLabel.Visible = true; }
+                qrBox.Image = GenerateQrBitmap(claimPayload, 240);
+            }
+            catch
+            {
+                qrBox.Visible         = false;
+                _qrErrorLabel.Visible = true;
+            }
 
             // ── Receipt summary ────────────────────────────────────────────────
             var receiptLabel = new Label
@@ -188,6 +190,18 @@ namespace SCCRMonPOS
             ResumeLayout(false);
         }
 
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            if (_targetScreen == null) return;
+
+            Rectangle area = _targetScreen.WorkingArea;
+            Location = new Point(
+                area.Left + Math.Max(0, (area.Width - Width) / 2),
+                area.Top + Math.Max(0, (area.Height - Height) / 2));
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -216,11 +230,12 @@ namespace SCCRMonPOS
                 "QR หมดอายุ: " + expires;
         }
 
-        private static string BuildQrImageUrl(string payload)
+        private static Bitmap GenerateQrBitmap(string payload, int pixels)
         {
-            string encoded = Uri.EscapeDataString(payload ?? string.Empty);
-            // api.qrserver.com — requires internet; the raw code below is shown as fallback.
-            return "https://api.qrserver.com/v1/create-qr-code/?size=240x240&ecc=M&data=" + encoded;
+            using (var generator = new QRCodeGenerator())
+            using (var data = generator.CreateQrCode(payload ?? "", QRCodeGenerator.ECCLevel.M))
+            using (var code = new QRCode(data))
+                return code.GetGraphic(pixels / 21 + 1, Color.Black, Color.White, true);
         }
     }
 }

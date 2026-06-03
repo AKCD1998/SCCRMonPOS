@@ -11,7 +11,7 @@ namespace SCCRMonPOS
     /// </summary>
     public class TransactionRepository
     {
-        public string LogFilePath { get; }
+        public string LogFilePath { get; private set; }
 
         private static readonly Random _rng = new Random();
 
@@ -44,7 +44,7 @@ namespace SCCRMonPOS
             string machine = SanitizeName(Environment.MachineName);
             string ts      = DateTime.Now.ToString("yyyyMMddHHmmss");
             string rand    = _rng.Next(1000, 9999).ToString();
-            return $"LOCAL-{machine}-{ts}-{rand}";
+            return "LOCAL-" + machine + "-" + ts + "-" + rand;
         }
 
         // ── Private helpers ──────────────────────────────────────────────────

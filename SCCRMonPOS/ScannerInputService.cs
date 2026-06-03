@@ -98,7 +98,7 @@ namespace SCCRMonPOS
             {
                 int err = Marshal.GetLastWin32Error();
                 MessageBox.Show(
-                    $"ไม่สามารถติดตั้ง keyboard hook ได้ (error {err})\n" +
+                    "ไม่สามารถติดตั้ง keyboard hook ได้ (error " + err + ")\n" +
                     "การสแกนบาร์โค้ดจะไม่ทำงานโดยอัตโนมัติ\n\n" +
                     "ลองรันโปรแกรมในฐานะ Administrator",
                     "SCCRM — คำเตือน",
@@ -115,7 +115,7 @@ namespace SCCRMonPOS
             _hookId = IntPtr.Zero;
         }
 
-        public void Dispose() => Stop();
+        public void Dispose() { Stop(); }
 
         // ── Hook callback ────────────────────────────────────────────────────
 

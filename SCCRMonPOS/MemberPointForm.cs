@@ -56,6 +56,7 @@ namespace SCCRMonPOS
         private ListView _lvProducts;
         private Label   _lblProductSummary;
         private CheckBox _chkEligibleSubtotalConfirmed;
+        private ListView _lvReceiptItems;
 
         private readonly List<ScreenedProduct> _screenedProducts = new List<ScreenedProduct>();
 
@@ -106,7 +107,9 @@ namespace SCCRMonPOS
             SuspendLayout();
 
             Text            = "SCCRM — สะสมแต้มสมาชิก";
-            ClientSize      = new Size(480, _requireProductScreening ? 610 : 390);
+            ClientSize      = new Size(480, _posReceipt != null
+                ? (_requireProductScreening ? 738 : 518)
+                : (_requireProductScreening ? 610 : 390));
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
@@ -194,7 +197,9 @@ namespace SCCRMonPOS
             _pnlStep2 = new Panel
             {
                 Location = new Point(0, 0),
-                Size = new Size(480, _requireProductScreening ? 548 : 328),
+                Size = new Size(480, _posReceipt != null
+                    ? (_requireProductScreening ? 676 : 456)
+                    : (_requireProductScreening ? 548 : 328)),
                 Visible = false
             };
 
@@ -205,18 +210,44 @@ namespace SCCRMonPOS
             _lblS2CurPoints.ForeColor = Color.DarkBlue;
             _lblS2CurPoints.Font      = new Font("Tahoma", 9.5f, FontStyle.Bold);
 
+            if (_posReceipt != null)
+            {
+                var grpItems = new GroupBox
+                {
+                    Text     = "รายการสินค้าในบิล  (แถวสีแดง = ยกเว้นจากการสะสมแต้ม)",
+                    Location = new Point(18, 120),
+                    Size     = new Size(440, 120)
+                };
+                _lvReceiptItems = new ListView
+                {
+                    Location    = new Point(12, 20),
+                    Size        = new Size(412, 90),
+                    View        = View.Details,
+                    FullRowSelect = true,
+                    GridLines   = true,
+                    HeaderStyle = ColumnHeaderStyle.Nonclickable,
+                    MultiSelect = false,
+                    TabStop     = false
+                };
+                _lvReceiptItems.Columns.Add("สินค้า", 242);
+                _lvReceiptItems.Columns.Add("จำนวน", 58);
+                _lvReceiptItems.Columns.Add("ราคา (บาท)", 112);
+                grpItems.Controls.Add(_lvReceiptItems);
+                _pnlStep2.Controls.Add(grpItems);
+            }
+
             var grpBill = new GroupBox
             {
-                Text = _requireProductScreening ? "ข้อมูลบิลและคัดกรองสินค้า" : "ข้อมูลบิล",
-                Location = new Point(18, 120),
-                Size = new Size(440, _requireProductScreening ? 380 : 160)
+                Text     = _requireProductScreening ? "ข้อมูลบิลและคัดกรองสินค้า" : "ข้อมูลบิล",
+                Location = new Point(18, _posReceipt != null ? 248 : 120),
+                Size     = new Size(440, _requireProductScreening ? 380 : 160)
             };
 
             var lblReceiptC = MakeLabel("หมายเลขใบเสร็จ :", new Point(12, 28), autoSize: true);
             _txtReceiptNo   = new TextBox { Location = new Point(165, 25), Size = new Size(255, 23), MaxLength = 50 };
 
             var lblBillC    = MakeLabel(
-                _requireProductScreening ? "ยอดที่ร่วมสะสมแต้ม :" : "ยอดบิล (บาท) :",
+                "ยอดที่ร่วมสะสมแต้ม :",
                 new Point(12, 60), autoSize: true);
             _txtBillAmount  = new TextBox { Location = new Point(165, 57), Size = new Size(255, 23), MaxLength = 12 };
             _txtBillAmount.TextChanged += (s, e) => RecalcPoints();
@@ -485,7 +516,7 @@ namespace SCCRMonPOS
                     _txtReceiptNo.Text = _posReceipt.DocNo;
 
                 if (string.IsNullOrEmpty(_txtBillAmount.Text))
-                    _txtBillAmount.Text = _posReceipt.GrandTotal.ToString("F2");
+                    _txtBillAmount.Text = CalcEligibleTotal(_posReceipt).ToString("F2");
 
                 // Auto-screen all products from the receipt (only if none screened yet)
                 if (_requireProductScreening && _posReceipt.Items.Count > 0
@@ -493,7 +524,29 @@ namespace SCCRMonPOS
                     _ = PreScreenProductsAsync(_posReceipt.Items);
             }
 
+            PopulateReceiptItems();
             RecalcPoints();
+        }
+
+        private void PopulateReceiptItems()
+        {
+            if (_lvReceiptItems == null || _posReceipt?.Items == null) return;
+            _lvReceiptItems.Items.Clear();
+            foreach (PosReceiptItem item in _posReceipt.Items)
+            {
+                bool excluded = (item.ProductName ?? "").StartsWith("เภสัช", StringComparison.Ordinal);
+                string name = item.ProductName ?? item.ProductCode ?? "-";
+                if (name.Length > 30) name = name.Substring(0, 27) + "...";
+                var row = new ListViewItem(name);
+                row.SubItems.Add(item.Qty.ToString("0.##", CultureInfo.InvariantCulture));
+                row.SubItems.Add(item.NetAmount.ToString("N2", CultureInfo.InvariantCulture));
+                if (excluded)
+                {
+                    row.ForeColor = Color.Firebrick;
+                    row.BackColor = Color.FromArgb(255, 235, 235);
+                }
+                _lvReceiptItems.Items.Add(row);
+            }
         }
 
         private void RecalcPoints()
@@ -513,6 +566,22 @@ namespace SCCRMonPOS
             decimal bill;
             if (!TryParseBill(_txtBillAmount.Text, out bill)) return 0;
             return (int)Math.Floor(bill / _bahtPerPoint);
+        }
+
+        // Sums NetAmount only for items whose name does NOT start with "เภสัช".
+        // Per พรบ.ยา พ.ศ.2510, pharmaceutical products are prohibited from
+        // any sales promotion, including loyalty points.
+        private static decimal CalcEligibleTotal(PosReceipt receipt)
+        {
+            if (receipt?.Items == null) return 0m;
+            decimal total = 0m;
+            foreach (PosReceiptItem item in receipt.Items)
+            {
+                string name = item.ProductName ?? "";
+                if (!name.StartsWith("เภสัช", StringComparison.Ordinal))
+                    total += item.NetAmount;
+            }
+            return total;
         }
 
         private static bool TryParseBill(string text, out decimal value)
@@ -576,15 +645,15 @@ namespace SCCRMonPOS
 
             string confirmMsg =
                 "ยืนยันการสะสมแต้ม?\n\n" +
-                $"ชื่อลูกค้า    :  {_customer.FullName}\n" +
-                $"รหัสสมาชิก  :  {_customer.MemberCode}\n" +
-                (string.IsNullOrEmpty(receiptNo) ? "" : $"ใบเสร็จ        :  {receiptNo}\n") +
+                "ชื่อลูกค้า    :  " + _customer.FullName + "\n" +
+                "รหัสสมาชิก  :  " + _customer.MemberCode + "\n" +
+                (string.IsNullOrEmpty(receiptNo) ? "" : "ใบเสร็จ        :  " + receiptNo + "\n") +
                 (_requireProductScreening
-                    ? $"ยอดที่ร่วมสะสมแต้ม :  {bill:N2} บาท\n"
-                    : $"ยอดบิล       :  {bill:N2} บาท\n") +
+                    ? "ยอดที่ร่วมสะสมแต้ม :  " + bill.ToString("N2") + " บาท\n"
+                    : "ยอดบิล       :  " + bill.ToString("N2") + " บาท\n") +
                 (_requireProductScreening ? BuildProductSummaryForConfirm() : "") +
-                $"แต้มที่ได้รับ  :  {earned:N0} แต้ม\n" +
-                $"แต้มรวมใหม่  :  {newTotal:N0} แต้ม";
+                "แต้มที่ได้รับ  :  " + earned.ToString("N0") + " แต้ม\n" +
+                "แต้มรวมใหม่  :  " + newTotal.ToString("N0") + " แต้ม";
 
             DialogResult dr = MessageBox.Show(
                 confirmMsg,
@@ -692,15 +761,15 @@ namespace SCCRMonPOS
         {
             string msg =
                 "✔  สะสมแต้มสำเร็จ!\n\n" +
-                $"ชื่อลูกค้า    :  {_customer.FullName}\n" +
-                $"รหัสสมาชิก  :  {_customer.MemberCode}\n" +
-                (string.IsNullOrEmpty(receiptNo) ? "" : $"ใบเสร็จ        :  {receiptNo}\n") +
+                "ชื่อลูกค้า    :  " + _customer.FullName + "\n" +
+                "รหัสสมาชิก  :  " + _customer.MemberCode + "\n" +
+                (string.IsNullOrEmpty(receiptNo) ? "" : "ใบเสร็จ        :  " + receiptNo + "\n") +
                 (_requireProductScreening
-                    ? $"ยอดที่ร่วมสะสมแต้ม :  {bill:N2} บาท\n"
-                    : $"ยอดบิล       :  {bill:N2} บาท\n") +
-                $"แต้มที่ได้รับ  :  {result.PointsAwarded:N0} แต้ม\n" +
-                $"แต้มรวมใหม่  :  {result.Balance:N0} แต้ม\n\n" +
-                $"[{result.TransactionId}]";
+                    ? "ยอดที่ร่วมสะสมแต้ม :  " + bill.ToString("N2") + " บาท\n"
+                    : "ยอดบิล       :  " + bill.ToString("N2") + " บาท\n") +
+                "แต้มที่ได้รับ  :  " + result.PointsAwarded.ToString("N0") + " แต้ม\n" +
+                "แต้มรวมใหม่  :  " + result.Balance.ToString("N0") + " แต้ม\n\n" +
+                "[" + result.TransactionId + "]";
 
             MessageBox.Show(msg, "SCCRM — สะสมแต้มสำเร็จ",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -869,7 +938,7 @@ namespace SCCRMonPOS
             }
 
             _lblProductSummary.Text =
-                $"คัดกรองแล้ว { _screenedProducts.Count:N0} รายการ | ร่วมสะสมแต้ม {eligible:N0} | ไม่ร่วม {blocked:N0} | ต้องตรวจสอบ {unresolved:N0}";
+                "คัดกรองแล้ว " + _screenedProducts.Count.ToString("N0") + " รายการ | ร่วมสะสมแต้ม " + eligible.ToString("N0") + " | ไม่ร่วม " + blocked.ToString("N0") + " | ต้องตรวจสอบ " + unresolved.ToString("N0");
         }
 
         private bool HasUnknownOrUnmatchedProducts()
@@ -891,8 +960,8 @@ namespace SCCRMonPOS
             }
 
             return
-                $"สินค้าที่ร่วมสะสมแต้ม :  {eligible:N0} รายการ\n" +
-                $"สินค้าที่ไม่ร่วมสะสมแต้ม :  {blocked:N0} รายการ\n";
+                "สินค้าที่ร่วมสะสมแต้ม :  " + eligible.ToString("N0") + " รายการ\n" +
+                "สินค้าที่ไม่ร่วมสะสมแต้ม :  " + blocked.ToString("N0") + " รายการ\n";
         }
 
         private void ToggleProductLookup(bool enabled)

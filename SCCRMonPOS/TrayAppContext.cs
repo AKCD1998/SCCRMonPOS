@@ -1,9 +1,7 @@
 using System;
 using System.Configuration;
-using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using SCCRMonPOS.Models;
 
@@ -11,13 +9,13 @@ namespace SCCRMonPOS
 {
     /// <summary>
     /// Application context living entirely in the system tray.
-    /// No main window — the app is headless until a barcode is scanned or the
-    /// operator right-clicks the tray icon.
     ///
-    /// Start-up sequence:
-    ///   1. Load auth (StaffAuthManager) — DPAPI-encrypted token from disk.
-    ///   2. If token present and not expired: init scanner, drain offline queue.
-    ///   3. If token missing or expired: prompt PIN entry before starting scanner.
+    /// Start-up:
+    ///   1. Load auth. If missing/expired, prompt login.
+    ///   2. Start AdaPosWatcher silently — caches latest completed receipt.
+    ///   3. Register Ctrl+Alt+Q hotkey — opens MemberClaimForm on demand.
+    ///
+    /// The app never auto-pops any window after a sale. Everything is cashier-triggered.
     /// </summary>
     public class TrayAppContext : ApplicationContext
     {
@@ -25,58 +23,40 @@ namespace SCCRMonPOS
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
 
         private NotifyIcon          _trayIcon;
-        private ScannerInputService _scanner;
         private AdaPosWatcher       _watcher;
+        private GlobalHotKeyManager _hotKey;
         private ApiClient           _api;
-        private ProductEligibilityClient _productEligibility;
         private StaffAuthManager    _auth;
-        private TransactionRepository _txRepo;
-        private OfflineQueue          _offlineQueue;
-        private readonly bool _requireProductScreening;
-        private readonly bool _claimQrEnabled;
-        private readonly string _claimQrInternalToken;
-        private readonly string _claimQrPayloadPrefix;
-        private readonly int _claimQrDisplaySeconds;
-        private readonly int _claimQrLookupAttempts;
-        private readonly int _claimQrLookupDelayMs;
+        private ReceiptWatermarkStore _watermarkStore;
+        private readonly bool _watcherDiagnosticsEnabled;
+        private readonly string _runtimeLogPath;
+        private readonly ReceiptWatermark _initialWatcherWatermark;
+        private readonly int _bahtPerPoint;
 
-        // Only one member-point popup may be open at a time
-        private MemberPointForm _activeForm;
-        private ClaimQrForm _activeClaimQrForm;
-
-        // Most-recently completed AdaPos receipt, waiting for a CRM barcode scan.
-        // Written from the watcher background thread; read on the UI thread — guarded by _receiptLock.
-        private PosReceipt        _standingByReceipt;
-        private readonly object   _receiptLock = new object();
-        private readonly object   _claimQrLock = new object();
-        private readonly HashSet<string> _claimQrPendingDocs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Tray menu items
-        private ToolStripMenuItem _miSyncPending;
+        // Latest completed receipt — used to pre-fill MemberClaimForm (never auto-shown).
+        private PosReceipt      _standingByReceipt;
+        private readonly object _receiptLock = new object();
+        private MemberClaimForm _activeMemberClaimForm;
         private ToolStripMenuItem _miWatcherStatus;
 
-        // ────────────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
+
         public TrayAppContext()
         {
             Directory.CreateDirectory(_dataFolder);
 
             string baseUrl = ConfigurationManager.AppSettings["ApiBaseUrl"]
                           ?? "https://sc-official-website.onrender.com";
-            string productEligibilityBaseUrl = ConfigurationManager.AppSettings["ProductEligibilityApiBaseUrl"] ?? "";
-            string productEligibilityApiKey  = ConfigurationManager.AppSettings["ProductEligibilityApiKey"] ?? "";
 
-            _api                     = new ApiClient(baseUrl);
-            _productEligibility      = new ProductEligibilityClient(productEligibilityBaseUrl, productEligibilityApiKey);
-            _auth                    = new StaffAuthManager(_dataFolder);
-            _txRepo                  = new TransactionRepository(_dataFolder);
-            _offlineQueue            = new OfflineQueue(_dataFolder);
-            _requireProductScreening = ReadBool("RequireProductScreeningForPoints", true);
-            _claimQrEnabled          = ReadBool("ClaimQrEnabled", true);
-            _claimQrInternalToken    = ConfigurationManager.AppSettings["ClaimQrInternalToken"] ?? "";
-            _claimQrPayloadPrefix    = ConfigurationManager.AppSettings["ClaimQrPayloadPrefix"] ?? "SCM-CLAIM-v1-";
-            _claimQrDisplaySeconds   = ReadInt("ClaimQrDisplaySeconds", 45);
-            _claimQrLookupAttempts   = ReadInt("ClaimQrLookupAttempts", 12);
-            _claimQrLookupDelayMs    = ReadInt("ClaimQrLookupDelayMs", 5000);
+            _api                      = new ApiClient(baseUrl);
+            _auth                     = new StaffAuthManager(_dataFolder);
+            _watermarkStore           = new ReceiptWatermarkStore(_dataFolder);
+            _watcherDiagnosticsEnabled = ReadBool("WatcherDiagnosticsEnabled", true);
+            _bahtPerPoint             = ReadInt("BahtPerPoint", 10);
+            _runtimeLogPath           = Path.Combine(_dataFolder, "runtime.log");
+            _initialWatcherWatermark  = LoadOrCreateWatcherWatermark();
+
+            LogRuntime("Application starting.");
 
             if (_auth.HasToken)
                 _api.SetStaffToken(_auth.StaffToken);
@@ -85,22 +65,14 @@ namespace SCCRMonPOS
 
             if (!_auth.HasToken || _api.IsTokenExpired())
             {
-                // First run, or token missing/expired — prompt before going live
                 if (_auth.HasToken && _api.IsTokenExpired())
-                    _auth.ClearToken();  // discard the stale token
-
+                    _auth.ClearToken();
                 ScheduleOnUiThread(PromptStaffLogin);
             }
             else
             {
-                InitScanner();
                 InitWatcher();
-                UpdateSyncMenuItem();
-                _trayIcon.ShowBalloonTip(2000, "SCCRM", "พร้อมรับการสแกนบาร์โค้ด", ToolTipIcon.Info);
-
-                // Silently retry any queued earn requests from a previous offline session
-                if (_offlineQueue.Count > 0)
-                    _ = DrainOfflineQueueAsync(silent: true);
+                _trayIcon.ShowBalloonTip(2000, "SCCRM", "พร้อมใช้งาน — กด Ctrl+Alt+Q เพื่อสะสมแต้ม", ToolTipIcon.Info);
             }
         }
 
@@ -113,18 +85,12 @@ namespace SCCRMonPOS
 
             if (result == DialogResult.OK)
             {
-                InitScanner();
                 InitWatcher();
-                UpdateSyncMenuItem();
                 _trayIcon.ShowBalloonTip(2000, "SCCRM",
-                    "เข้าสู่ระบบสำเร็จ — พร้อมรับการสแกน", ToolTipIcon.Info);
-
-                if (_offlineQueue.Count > 0)
-                    _ = DrainOfflineQueueAsync(silent: false);
+                    "เข้าสู่ระบบสำเร็จ — กด Ctrl+Alt+Q เพื่อสะสมแต้ม", ToolTipIcon.Info);
             }
             else
             {
-                // Operator cancelled — exit immediately
                 Application.Exit();
             }
         }
@@ -133,25 +99,19 @@ namespace SCCRMonPOS
 
         private void InitTrayIcon()
         {
-            _miSyncPending = new ToolStripMenuItem("รายการรอส่ง (0)", null, OnSyncPending)
-            {
-                Enabled = false
-            };
-
             _miWatcherStatus = new ToolStripMenuItem("AdaPos DB: รอเชื่อมต่อ…")
             {
                 Enabled = false
             };
 
             var menu = new ContextMenuStrip();
-            menu.Items.Add("เปิดหน้าต่างค้นหาสมาชิก", null, OnOpenSearchWindow);
+            menu.Items.Add("สะสมแต้ม (Ctrl+Alt+Q)", null, (s, e) => OpenMemberClaimForm());
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(_miSyncPending);
             menu.Items.Add(_miWatcherStatus);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("เปลี่ยน PIN / Device",     null, OnReAuthenticate);
+            menu.Items.Add("เปลี่ยน PIN / Device", null, OnReAuthenticate);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("ออกจากโปรแกรม",            null, OnExit);
+            menu.Items.Add("ออกจากโปรแกรม",        null, OnExit);
 
             _trayIcon = new NotifyIcon
             {
@@ -161,18 +121,7 @@ namespace SCCRMonPOS
                 Visible          = true
             };
 
-            _trayIcon.DoubleClick += (s, e) => OnOpenSearchWindow(s, e);
-        }
-
-        // ── Scanner ────────────────────────────────────────────────────────────
-
-        private void InitScanner()
-        {
-            if (_scanner != null) return;
-            _scanner = new ScannerInputService();
-            _scanner.PointScanDetected  += OnPointScan;
-            _scanner.RedeemScanDetected += OnRedeemScan;
-            _scanner.Start();
+            _trayIcon.DoubleClick += (s, e) => OpenMemberClaimForm();
         }
 
         // ── AdaPos DB watcher ──────────────────────────────────────────────────
@@ -180,48 +129,64 @@ namespace SCCRMonPOS
         private void InitWatcher()
         {
             if (_watcher != null) return;
-            _watcher = new AdaPosWatcher();
-            if (!_watcher.IsEnabled) return;
+            _watcher = new AdaPosWatcher(_initialWatcherWatermark, _watcherDiagnosticsEnabled);
+            if (!_watcher.IsEnabled)
+            {
+                LogRuntime("AdaPos watcher is disabled by config.");
+                return;
+            }
 
             _watcher.ReceiptCompleted    += OnReceiptCompleted;
             _watcher.ReturnDetected      += OnReturnDetected;
             _watcher.WatcherConnected    += OnWatcherConnected;
             _watcher.WatcherDisconnected += OnWatcherDisconnected;
+            _watcher.WatcherDiagnostic   += (s, msg) => LogRuntime(msg);
             _watcher.Start();
+            LogRuntime("AdaPos watcher started.");
+
+            RegisterHotKey();
         }
 
-        // Called from the watcher background thread — only update in-memory state here.
+        // Called from the watcher background thread — cache only, no auto-popup.
         private void OnReceiptCompleted(object sender, PosReceipt receipt)
         {
+            LogRuntime(
+                "Receipt detected: doc=" + (receipt?.DocNo ?? "-") +
+                ", branch=" + (receipt?.BranchCode ?? "-") +
+                ", total=" + (receipt == null ? "-" : receipt.GrandTotal.ToString("F2")));
+
+            AdvanceWatermark(receipt);
+
             lock (_receiptLock)
                 _standingByReceipt = receipt;
-
-            if (_claimQrEnabled)
-                _ = TryShowClaimQrAsync(receipt);
         }
 
         private void OnReturnDetected(object sender, PosReceipt receipt)
         {
-            // Overwrite standing-by with the return so it doesn't trigger loyalty on a refund
+            LogRuntime("Return detected: doc=" + (receipt?.DocNo ?? "-"));
+            AdvanceWatermark(receipt);
             lock (_receiptLock)
                 _standingByReceipt = null;
+        }
 
-            ScheduleOnUiThread(() =>
+        private void AdvanceWatermark(PosReceipt receipt)
+        {
+            if (receipt == null) return;
+            try
             {
-                if (_activeClaimQrForm != null && !_activeClaimQrForm.IsDisposed)
-                    _activeClaimQrForm.Close();
-            });
-
-            ScheduleOnUiThread(() =>
-                _trayIcon.ShowBalloonTip(4000, "SCCRM — คืนสินค้า",
-                    $"ตรวจพบรายการคืนสินค้า {receipt.DocNo}\n" +
-                    $"อ้างอิงบิลเดิม: {receipt.OriginalDocNo}\n" +
-                    "กรุณาตรวจสอบแต้มใน CRM",
-                    ToolTipIcon.Warning));
+                ReceiptWatermark wm = ReceiptWatermark.FromReceipt(receipt);
+                _watermarkStore.Save(wm);
+                _watcher?.AcknowledgeReceipt(receipt);
+            }
+            catch (Exception ex)
+            {
+                LogRuntime("Watermark advance failed: " + ex.Message);
+            }
         }
 
         private void OnWatcherConnected(object sender, EventArgs e)
         {
+            LogRuntime("AdaPos watcher connected.");
             ScheduleOnUiThread(() =>
             {
                 if (_miWatcherStatus != null)
@@ -231,54 +196,44 @@ namespace SCCRMonPOS
 
         private void OnWatcherDisconnected(object sender, string errorMessage)
         {
-            lock (_receiptLock)
-                _standingByReceipt = null;
-
+            LogRuntime("AdaPos watcher disconnected: " + (errorMessage ?? "?"));
+            lock (_receiptLock) _standingByReceipt = null;
             ScheduleOnUiThread(() =>
             {
                 if (_miWatcherStatus != null)
                     _miWatcherStatus.Text = "AdaPos DB: ขาดการเชื่อมต่อ ⚠";
-                _trayIcon.ShowBalloonTip(4000, "SCCRM — AdaPos DB",
-                    "ขาดการเชื่อมต่อกับฐานข้อมูล AdaPos\nจะลองเชื่อมต่อใหม่อัตโนมัติ",
-                    ToolTipIcon.Warning);
             });
         }
 
-        // ── Scanner events ─────────────────────────────────────────────────────
+        // ── Hotkey ─────────────────────────────────────────────────────────────
 
-        private void OnPointScan(object sender, string scanToken)
+        private void RegisterHotKey()
         {
-            ScheduleOnUiThread(() =>
+            uint modifiers  = (uint)ReadInt("ClaimQrHotKeyModifiers",  3);    // Ctrl+Alt
+            uint virtualKey = (uint)ReadHex("ClaimQrHotKeyVirtualKey", 0x51); // Q
+
+            _hotKey = new GlobalHotKeyManager();
+            if (_hotKey.Register(modifiers, virtualKey))
             {
-                // Pre-check expiry before opening the form
-                if (_api.IsTokenExpired())
-                {
-                    _trayIcon.ShowBalloonTip(3000, "SCCRM",
-                        "หมดอายุการเข้าสู่ระบบ กรุณายืนยันตัวตนพนักงานอีกครั้ง",
-                        ToolTipIcon.Warning);
-                    HandleSessionExpired();
-                    return;
-                }
-                OpenPointForm(scanToken);
-            });
+                _hotKey.HotKeyPressed += (s, e) => OpenMemberClaimForm();
+                LogRuntime("Hotkey registered (Ctrl+Alt+Q).");
+            }
+            else
+            {
+                LogRuntime("Hotkey could not be registered (conflict?).");
+                _hotKey.Dispose();
+                _hotKey = null;
+            }
         }
 
-        private void OnRedeemScan(object sender, string scanToken)
-        {
-            _trayIcon.ShowBalloonTip(
-                3000, "SCCRM",
-                "การแลกแต้มยังไม่รองรับในเวอร์ชันนี้",
-                ToolTipIcon.Warning);
-        }
+        // ── MemberClaimForm ────────────────────────────────────────────────────
 
-        // ── Tray menu handlers ─────────────────────────────────────────────────
-
-        private void OnOpenSearchWindow(object sender, EventArgs e)
+        private void OpenMemberClaimForm()
         {
-            if (_activeForm != null && !_activeForm.IsDisposed)
+            if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed)
             {
-                _activeForm.BringToFront();
-                _activeForm.Activate();
+                _activeMemberClaimForm.BringToFront();
+                _activeMemberClaimForm.Activate();
                 return;
             }
 
@@ -291,25 +246,26 @@ namespace SCCRMonPOS
                 return;
             }
 
-            OpenPointForm(string.Empty);
+            PosReceipt prefill;
+            lock (_receiptLock) prefill = _standingByReceipt;
+
+            _activeMemberClaimForm = new MemberClaimForm(
+                _api, _watcher, _bahtPerPoint, _auth.DeviceId, prefill);
+
+            _activeMemberClaimForm.FormClosed += (s, e) =>
+            {
+                _activeMemberClaimForm = null;
+            };
+
+            _activeMemberClaimForm.Show();
+            _activeMemberClaimForm.BringToFront();
         }
 
-        private void OnSyncPending(object sender, EventArgs e)
-        {
-            if (_offlineQueue.Count == 0)
-            {
-                MessageBox.Show("ไม่มีรายการรอส่ง", "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            _ = DrainOfflineQueueAsync(silent: false);
-        }
+        // ── Tray menu handlers ─────────────────────────────────────────────────
 
         private void OnReAuthenticate(object sender, EventArgs e)
         {
             _auth.ClearToken();
-            _scanner?.Stop();
-            _scanner?.Dispose();
-            _scanner = null;
             _watcher?.Stop();
             _watcher?.Dispose();
             _watcher = null;
@@ -319,24 +275,17 @@ namespace SCCRMonPOS
 
         private void OnExit(object sender, EventArgs e)
         {
-            _scanner?.Stop();
             _watcher?.Stop();
+            _hotKey?.Dispose();
             _trayIcon.Visible = false;
             Application.Exit();
         }
 
-        // ── Token expiry recovery ──────────────────────────────────────────────
+        // ── Session expiry ─────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Called when MemberPointForm fires SessionExpired or when a pre-check
-        /// detects an expired token before opening the form.
-        /// </summary>
         private void HandleSessionExpired()
         {
             _auth.ClearToken();
-            _scanner?.Stop();
-            _scanner?.Dispose();
-            _scanner = null;
             _watcher?.Stop();
             _watcher?.Dispose();
             _watcher = null;
@@ -344,157 +293,39 @@ namespace SCCRMonPOS
             PromptStaffLogin();
         }
 
-        // ── Offline queue ──────────────────────────────────────────────────────
+        // ── Watermark ─────────────────────────────────────────────────────────
 
-        private async Task DrainOfflineQueueAsync(bool silent)
+        private ReceiptWatermark LoadOrCreateWatcherWatermark()
         {
-            if (_api.IsTokenExpired()) return;
-
-            try
+            ReceiptWatermark loaded = _watermarkStore.Load();
+            if (loaded != null)
             {
-                DrainResult r = await _offlineQueue.DrainAsync(_api);
-
-                UpdateSyncMenuItem();
-
-                if (!silent || r.Submitted > 0)
-                {
-                    string msg = r.Submitted > 0
-                        ? $"ส่งรายการค้าง {r.Submitted} รายการเรียบร้อย" +
-                          (r.Failed > 0 ? $"\nยังค้างอยู่ {r.Failed} รายการ" : "")
-                        : $"มีรายการค้าง {r.Failed} รายการ ส่งไม่สำเร็จ กรุณาลองใหม่";
-
-                    _trayIcon.ShowBalloonTip(
-                        4000, "SCCRM — รายการค้าง",
-                        msg,
-                        r.Failed == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
-                }
+                LogRuntime("Loaded watermark: " + loaded.Describe());
+                return loaded;
             }
-            catch { /* drain errors are non-fatal */ }
+            ReceiptWatermark seeded = ReceiptWatermark.Create(DateTime.Today, DateTime.Now.ToString("HH:mm:ss"), "");
+            _watermarkStore.Save(seeded);
+            LogRuntime("Created initial watermark: " + seeded.Describe());
+            return seeded;
         }
 
-        private void UpdateSyncMenuItem()
-        {
-            if (_miSyncPending == null) return;
-            int count = _offlineQueue.Count;
-            _miSyncPending.Text    = $"รายการรอส่ง ({count})";
-            _miSyncPending.Enabled = count > 0;
-        }
-
-        // ── Helpers ────────────────────────────────────────────────────────────
-
-        private void OpenPointForm(string scanToken)
-        {
-            if (_activeForm != null && !_activeForm.IsDisposed)
-                return;
-
-            // Consume the standing-by receipt — cleared so the next sale starts fresh
-            PosReceipt receipt;
-            lock (_receiptLock)
-            {
-                receipt = _standingByReceipt;
-                _standingByReceipt = null;
-            }
-
-            _activeForm = new MemberPointForm(
-                scanToken, _api, _txRepo, _offlineQueue, _productEligibility,
-                _requireProductScreening, receipt);
-            _activeForm.SessionExpired += (s, e) =>
-            {
-                // MemberPointForm already closed itself; now handle re-auth
-                ScheduleOnUiThread(HandleSessionExpired);
-            };
-            _activeForm.FormClosed += (s, e) =>
-            {
-                _activeForm = null;
-                UpdateSyncMenuItem();   // refresh in case something was queued
-            };
-            _activeForm.Show();
-            _activeForm.BringToFront();
-        }
-
-        private async Task TryShowClaimQrAsync(PosReceipt receipt)
-        {
-            if (receipt == null || receipt.IsReturn) return;
-            if (string.IsNullOrWhiteSpace(_claimQrInternalToken)) return;
-
-            string docKey = (receipt.BranchCode ?? "") + "|" + (receipt.DocNo ?? "");
-            lock (_claimQrLock)
-            {
-                if (_claimQrPendingDocs.Contains(docKey))
-                    return;
-                _claimQrPendingDocs.Add(docKey);
-            }
-
-            try
-            {
-                for (int attempt = 0; attempt < Math.Max(1, _claimQrLookupAttempts); attempt++)
-                {
-                    try
-                    {
-                        ClaimTokenApiResult result = await _api.CreateSaleClaimTokenAsync(
-                            receipt.BranchCode, receipt.DocNo, _claimQrInternalToken);
-
-                        string claimPayload = (_claimQrPayloadPrefix ?? "SCM-CLAIM-v1-") + result.ClaimToken;
-                        ScheduleOnUiThread(() => ShowClaimQrForm(receipt, claimPayload, result.ExpiresAt));
-                        return;
-                    }
-                    catch (NetworkApiException)
-                    {
-                        if (attempt >= _claimQrLookupAttempts - 1)
-                            return;
-                    }
-                    catch (ApiException ex)
-                    {
-                        bool retryable = ex.Message.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || ex.Message.IndexOf("ไม่พบ", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || ex.Message.IndexOf("Sale event", StringComparison.OrdinalIgnoreCase) >= 0;
-                        bool alreadyClaimed = ex.Message.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                        if (alreadyClaimed)
-                            return;
-
-                        if (!retryable || attempt >= _claimQrLookupAttempts - 1)
-                            return;
-                    }
-
-                    await Task.Delay(Math.Max(500, _claimQrLookupDelayMs));
-                }
-            }
-            finally
-            {
-                lock (_claimQrLock)
-                    _claimQrPendingDocs.Remove(docKey);
-            }
-        }
-
-        private void ShowClaimQrForm(PosReceipt receipt, string claimPayload, DateTime? expiresAt)
-        {
-            if (_activeClaimQrForm != null && !_activeClaimQrForm.IsDisposed)
-            {
-                _activeClaimQrForm.Close();
-                _activeClaimQrForm = null;
-            }
-
-            _activeClaimQrForm = new ClaimQrForm(
-                receipt,
-                claimPayload,
-                expiresAt,
-                _claimQrDisplaySeconds);
-            _activeClaimQrForm.FormClosed += (s, e) => _activeClaimQrForm = null;
-            _activeClaimQrForm.Show();
-            _activeClaimQrForm.BringToFront();
-        }
+        // ── Utilities ─────────────────────────────────────────────────────────
 
         private static void ScheduleOnUiThread(Action action)
         {
             var t = new Timer { Interval = 1 };
-            t.Tick += (s, e) =>
-            {
-                t.Stop();
-                t.Dispose();
-                action();
-            };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); action(); };
             t.Start();
+        }
+
+        private void LogRuntime(string message)
+        {
+            try
+            {
+                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " | " + message;
+                File.AppendAllText(_runtimeLogPath, line + Environment.NewLine);
+            }
+            catch { }
         }
 
         private static bool ReadBool(string key, bool defaultValue)
@@ -509,6 +340,17 @@ namespace SCCRMonPOS
             string raw = ConfigurationManager.AppSettings[key];
             int parsed;
             return int.TryParse(raw, out parsed) ? parsed : defaultValue;
+        }
+
+        private static int ReadHex(string key, int defaultValue)
+        {
+            string raw = ConfigurationManager.AppSettings[key];
+            if (string.IsNullOrWhiteSpace(raw)) return defaultValue;
+            raw = raw.Trim();
+            if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                raw = raw.Substring(2);
+            int result;
+            return int.TryParse(raw, System.Globalization.NumberStyles.HexNumber, null, out result) ? result : defaultValue;
         }
 
         private static Icon BuildTrayIcon()
@@ -532,10 +374,10 @@ namespace SCCRMonPOS
         {
             if (disposing)
             {
-                _scanner?.Dispose();
                 _watcher?.Dispose();
+                _hotKey?.Dispose();
                 _trayIcon?.Dispose();
-                _activeClaimQrForm?.Dispose();
+                _activeMemberClaimForm?.Dispose();
             }
             base.Dispose(disposing);
         }

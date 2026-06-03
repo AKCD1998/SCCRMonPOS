@@ -220,8 +220,8 @@ namespace SCCRMonPOS
 
     public struct DrainResult
     {
-        public int Submitted { get; }
-        public int Failed    { get; }
+        public int Submitted { get; private set; }
+        public int Failed    { get; private set; }
 
         public DrainResult(int submitted, int failed)
         {

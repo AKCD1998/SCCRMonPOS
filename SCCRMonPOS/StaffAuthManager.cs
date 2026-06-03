@@ -26,9 +26,9 @@ namespace SCCRMonPOS
         private string _deviceId;
         private string _staffToken;
 
-        public string DeviceId    => _deviceId;
-        public string StaffToken  => _staffToken;
-        public bool   HasToken    => !string.IsNullOrEmpty(_staffToken);
+        public string DeviceId   { get { return _deviceId; } }
+        public string StaffToken { get { return _staffToken; } }
+        public bool   HasToken   { get { return !string.IsNullOrEmpty(_staffToken); } }
 
         public string DeviceName
         {

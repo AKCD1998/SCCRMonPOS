@@ -9,6 +9,7 @@ using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using SCCRMonPOS.Models;
 
 namespace SCCRMonPOS
 {
@@ -40,6 +41,72 @@ namespace SCCRMonPOS
     {
         public string ClaimToken { get; set; }
         public DateTime? ExpiresAt { get; set; }
+    }
+
+    // ── New loyalty flow shapes ─────────────────────────────────────────────────
+
+    public class MemberSearchResult
+    {
+        public string Id            { get; set; }
+        public string DisplayName   { get; set; }
+        public string Phone         { get; set; }
+        public string Email         { get; set; }
+        public string MemberCode    { get; set; }
+        public int    CurrentPoints { get; set; }
+    }
+
+    public class LoyaltyClaimItem
+    {
+        public string  ProductCode { get; set; }
+        public string  ProductName { get; set; }
+        public decimal Qty         { get; set; }
+        public decimal UnitPrice   { get; set; }
+        public decimal LineTotal   { get; set; }
+    }
+
+    public class LoyaltyClaimRequest
+    {
+        public string             ReceiptNo        { get; set; }
+        public string             BranchCode       { get; set; }
+        public string             CashierStaffCode { get; set; }
+        public string             SoldAt           { get; set; }
+        public decimal            TotalAmount      { get; set; }
+        public int                PreviewPoints    { get; set; }
+        public string             MemberId         { get; set; }
+        public LoyaltyClaimItem[] Items            { get; set; }
+    }
+
+    public class LoyaltyClaimResponse
+    {
+        public bool   Ok              { get; set; }
+        public string ClaimId         { get; set; }
+        public string ReceiptNo       { get; set; }
+        public string MemberName      { get; set; }
+        public int    AwardedPoints   { get; set; }
+        public int    NewPointsBalance { get; set; }
+    }
+
+    public class CreateMemberRequest
+    {
+        public string Name   { get; set; }
+        public string Phone  { get; set; }
+        public string Email  { get; set; }
+        public string Sex    { get; set; }
+        public string Dob    { get; set; }
+        public string Remark { get; set; }
+    }
+
+    public class MemberDetail
+    {
+        public string Id            { get; set; }
+        public string DisplayName   { get; set; }
+        public string Phone         { get; set; }
+        public string Email         { get; set; }
+        public string MemberCode    { get; set; }
+        public int    CurrentPoints { get; set; }
+        public string Sex           { get; set; }
+        public string Dob           { get; set; }
+        public string Remark        { get; set; }
     }
 
     // ── Exceptions ──────────────────────────────────────────────────────────────
@@ -216,6 +283,277 @@ namespace SCCRMonPOS
             };
         }
 
+        // ── New loyalty flow ────────────────────────────────────────────────────
+
+        public async Task<MemberSearchResult[]> SearchMembersAsync(string query)
+        {
+            RequireValidToken();
+            if (string.IsNullOrWhiteSpace(query))
+                return new MemberSearchResult[0];
+
+            string json = await GetJsonAsync(
+                "/api/members/search?q=" + Uri.EscapeDataString(query.Trim()),
+                _staffToken);
+            return ParseMemberSearchResults(json);
+        }
+
+        public async Task<MemberDetail> GetMemberAsync(string memberId)
+        {
+            RequireValidToken();
+            if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
+            string json;
+            try
+            {
+                json = await GetJsonAsync("/api/members/" + Uri.EscapeDataString(memberId), _staffToken);
+            }
+            catch (ApiException ex) when (IsMissingMemberEditRoute(ex))
+            {
+                throw new ApiException("ระบบหลังบ้านยังไม่เปิดใช้งานการโหลดข้อมูลสมาชิกสำหรับแก้ไข");
+            }
+            return ParseMemberDetail(json);
+        }
+
+        public async Task<MemberSearchResult> UpdateMemberAsync(string memberId, CreateMemberRequest request)
+        {
+            RequireValidToken();
+            if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
+            if (request == null) throw new ApiException("request is required.");
+
+            var sb = new StringBuilder(512);
+            sb.Append('{');
+            sb.Append("\"name\":"  ).Append(JsonStr(request.Name)).Append(',');
+            sb.Append("\"phone\":" ).Append(JsonStr(request.Phone)).Append(',');
+            sb.Append("\"email\":" ).Append(JsonStr(request.Email)).Append(',');
+            sb.Append("\"sex\":"   ).Append(JsonStr(request.Sex)).Append(',');
+            sb.Append("\"dob\":"   ).Append(JsonStr(request.Dob)).Append(',');
+            sb.Append("\"remark\":").Append(JsonStr(request.Remark));
+            sb.Append('}');
+
+            string json;
+            try
+            {
+                json = await PutJsonAsync("/api/members/" + Uri.EscapeDataString(memberId), sb.ToString(), _staffToken);
+            }
+            catch (ApiException ex) when (IsMissingMemberEditRoute(ex))
+            {
+                throw new ApiException("ระบบหลังบ้านยังไม่เปิดใช้งานการแก้ไขข้อมูลสมาชิก");
+            }
+            var single = ParseSingleMember(json);
+            if (single != null) return single;
+            var arr = ParseMemberSearchResults(json);
+            if (arr != null && arr.Length > 0) return arr[0];
+            throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+        }
+
+        public async Task<MemberSearchResult> CreateMemberAsync(CreateMemberRequest request)
+        {
+            RequireValidToken();
+            if (request == null) throw new ApiException("request is required.");
+
+            var sb = new StringBuilder(512);
+            sb.Append('{');
+            sb.Append("\"name\":"  ).Append(JsonStr(request.Name)).Append(',');
+            sb.Append("\"phone\":" ).Append(JsonStr(request.Phone)).Append(',');
+            sb.Append("\"email\":" ).Append(JsonStr(request.Email)).Append(',');
+            sb.Append("\"sex\":"   ).Append(JsonStr(request.Sex)).Append(',');
+            sb.Append("\"dob\":"   ).Append(JsonStr(request.Dob)).Append(',');
+            sb.Append("\"remark\":").Append(JsonStr(request.Remark));
+            sb.Append('}');
+
+            string json = await PostJsonAsync("/api/members", sb.ToString(), _staffToken);
+            var results = ParseMemberSearchResults(json);
+            if (results != null && results.Length > 0) return results[0];
+
+            // Backend may return a single object rather than array
+            var single = ParseSingleMember(json);
+            if (single != null) return single;
+
+            throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+        }
+
+        public async Task<LoyaltyClaimResponse> SubmitLoyaltyClaimAsync(LoyaltyClaimRequest request)
+        {
+            RequireValidToken();
+            if (request == null) throw new ApiException("request is required.");
+
+            string body = BuildLoyaltyClaimJson(request);
+            string json = await PostJsonAsync("/api/loyalty/claims", body, _staffToken);
+            return ParseLoyaltyClaimResponse(json);
+        }
+
+        public async Task RegisterSaleEventAsync(PosReceipt receipt, string internalToken)
+        {
+            if (receipt == null)
+                throw new ApiException("receipt is required.");
+            if (string.IsNullOrWhiteSpace(receipt.BranchCode))
+                throw new ApiException("branchCode is required.");
+            if (string.IsNullOrWhiteSpace(receipt.DocNo))
+                throw new ApiException("docNo is required.");
+            if (string.IsNullOrWhiteSpace(internalToken))
+                throw new ApiException("Claim QR internal token is not configured.");
+
+            string body = BuildSaleEventJson(receipt);
+            await PostJsonWithInternalTokenAsync(
+                "/internal/crm/pos/sale-event", body, internalToken.Trim());
+        }
+
+        // ── New loyalty flow helpers ────────────────────────────────────────────
+
+        [DataContract] private sealed class MemberSearchDto
+        {
+            [DataMember(Name = "id")]            public string Id            { get; set; }
+            [DataMember(Name = "displayName")]   public string DisplayName   { get; set; }
+            [DataMember(Name = "phone")]         public string Phone         { get; set; }
+            [DataMember(Name = "email")]         public string Email         { get; set; }
+            [DataMember(Name = "memberCode")]    public string MemberCode    { get; set; }
+            [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
+        }
+
+        [DataContract] private sealed class LoyaltyClaimResponseDto
+        {
+            [DataMember(Name = "ok")]               public bool   Ok               { get; set; }
+            [DataMember(Name = "claimId")]          public string ClaimId          { get; set; }
+            [DataMember(Name = "receiptNo")]        public string ReceiptNo        { get; set; }
+            [DataMember(Name = "awardedPoints")]    public int    AwardedPoints    { get; set; }
+            [DataMember(Name = "newPointsBalance")] public int    NewPointsBalance { get; set; }
+            [DataMember(Name = "member")]           public LoyaltyClaimMemberDto Member { get; set; }
+        }
+
+        [DataContract] private sealed class LoyaltyClaimMemberDto
+        {
+            [DataMember(Name = "id")]          public string Id          { get; set; }
+            [DataMember(Name = "displayName")] public string DisplayName { get; set; }
+        }
+
+        [DataContract] private sealed class MemberDetailDto
+        {
+            [DataMember(Name = "id")]            public string Id            { get; set; }
+            [DataMember(Name = "displayName")]   public string DisplayName   { get; set; }
+            [DataMember(Name = "phone")]         public string Phone         { get; set; }
+            [DataMember(Name = "email")]         public string Email         { get; set; }
+            [DataMember(Name = "memberCode")]    public string MemberCode    { get; set; }
+            [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
+            [DataMember(Name = "sex")]           public string Sex           { get; set; }
+            [DataMember(Name = "dob")]           public string Dob           { get; set; }
+            [DataMember(Name = "remark")]        public string Remark        { get; set; }
+        }
+
+        private static MemberDetail ParseMemberDetail(string json)
+        {
+            try
+            {
+                var dto = Deserialize<MemberDetailDto>(json);
+                if (dto == null) return null;
+                return new MemberDetail
+                {
+                    Id            = dto.Id,
+                    DisplayName   = dto.DisplayName,
+                    Phone         = dto.Phone,
+                    Email         = dto.Email,
+                    MemberCode    = dto.MemberCode,
+                    CurrentPoints = dto.CurrentPoints,
+                    Sex           = dto.Sex,
+                    Dob           = dto.Dob,
+                    Remark        = dto.Remark
+                };
+            }
+            catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static MemberSearchResult ParseSingleMember(string json)
+        {
+            try
+            {
+                var dto = Deserialize<MemberSearchDto>(json);
+                if (dto == null || string.IsNullOrEmpty(dto.Id)) return null;
+                return new MemberSearchResult
+                {
+                    Id            = dto.Id,
+                    DisplayName   = dto.DisplayName,
+                    Phone         = dto.Phone,
+                    Email         = dto.Email,
+                    MemberCode    = dto.MemberCode,
+                    CurrentPoints = dto.CurrentPoints
+                };
+            }
+            catch { return null; }
+        }
+
+        private static MemberSearchResult[] ParseMemberSearchResults(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return new MemberSearchResult[0];
+            try
+            {
+                var ser = new DataContractJsonSerializer(typeof(MemberSearchDto[]));
+                using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                {
+                    var dtos = ser.ReadObject(ms) as MemberSearchDto[];
+                    if (dtos == null) return new MemberSearchResult[0];
+                    var results = new MemberSearchResult[dtos.Length];
+                    for (int i = 0; i < dtos.Length; i++)
+                    {
+                        results[i] = new MemberSearchResult
+                        {
+                            Id            = dtos[i].Id,
+                            DisplayName   = dtos[i].DisplayName,
+                            Phone         = dtos[i].Phone,
+                            Email         = dtos[i].Email,
+                            MemberCode    = dtos[i].MemberCode,
+                            CurrentPoints = dtos[i].CurrentPoints
+                        };
+                    }
+                    return results;
+                }
+            }
+            catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static LoyaltyClaimResponse ParseLoyaltyClaimResponse(string json)
+        {
+            var dto = Deserialize<LoyaltyClaimResponseDto>(json);
+            if (dto == null) throw new ApiException("เซิร์ฟเวอร์ไม่ส่งผลลัพธ์การสะสมแต้มกลับมา");
+            return new LoyaltyClaimResponse
+            {
+                Ok               = dto.Ok,
+                ClaimId          = dto.ClaimId,
+                ReceiptNo        = dto.ReceiptNo,
+                MemberName       = dto.Member?.DisplayName ?? "",
+                AwardedPoints    = dto.AwardedPoints,
+                NewPointsBalance = dto.NewPointsBalance
+            };
+        }
+
+        private static string BuildLoyaltyClaimJson(LoyaltyClaimRequest r)
+        {
+            var sb = new StringBuilder(2048);
+            sb.Append('{');
+            sb.Append("\"receiptNo\":").Append(JsonStr(r.ReceiptNo)).Append(',');
+            sb.Append("\"branchCode\":").Append(JsonStr(r.BranchCode)).Append(',');
+            sb.Append("\"cashierStaffCode\":").Append(JsonStr(r.CashierStaffCode)).Append(',');
+            sb.Append("\"soldAt\":").Append(JsonStr(r.SoldAt)).Append(',');
+            sb.Append("\"totalAmount\":").Append(JsonNum(r.TotalAmount)).Append(',');
+            sb.Append("\"previewPoints\":").Append(r.PreviewPoints).Append(',');
+            sb.Append("\"memberId\":").Append(JsonStr(r.MemberId)).Append(',');
+            sb.Append("\"items\":[");
+            if (r.Items != null)
+            {
+                for (int i = 0; i < r.Items.Length; i++)
+                {
+                    var item = r.Items[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append('{');
+                    sb.Append("\"productCode\":").Append(JsonStr(item.ProductCode)).Append(',');
+                    sb.Append("\"productName\":").Append(JsonStr(item.ProductName)).Append(',');
+                    sb.Append("\"qty\":").Append(JsonNum(item.Qty)).Append(',');
+                    sb.Append("\"unitPrice\":").Append(JsonNum(item.UnitPrice)).Append(',');
+                    sb.Append("\"lineTotal\":").Append(JsonNum(item.LineTotal));
+                    sb.Append('}');
+                }
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         // ── Internal DTOs (private — consumers use ApiCustomer / EarnApiResult) ──
 
         [DataContract]
@@ -320,6 +658,20 @@ namespace SCCRMonPOS
             });
         }
 
+        private Task<string> PutJsonAsync(string path, string jsonBody, string token)
+        {
+            return SendWithRetryAsync(() =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Put, _baseUrl + path)
+                {
+                    Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(token))
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                return req;
+            });
+        }
+
         private Task<string> PostJsonWithInternalTokenAsync(string path, string jsonBody, string internalToken)
         {
             return SendWithRetryAsync(() =>
@@ -411,6 +763,17 @@ namespace SCCRMonPOS
             catch { return null; }
         }
 
+        private static bool IsMissingMemberEditRoute(ApiException ex)
+        {
+            if (ex == null || string.IsNullOrWhiteSpace(ex.Message))
+                return false;
+
+            string msg = ex.Message;
+            return msg.IndexOf("Cannot GET /api/members/", StringComparison.OrdinalIgnoreCase) >= 0
+                || msg.IndexOf("Cannot PUT /api/members/", StringComparison.OrdinalIgnoreCase) >= 0
+                || msg.IndexOf("HTTP 404", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static DateTime? ParseDateTimeOrNull(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
@@ -424,6 +787,57 @@ namespace SCCRMonPOS
                 return parsed;
             }
             return null;
+        }
+
+        private static string BuildSaleEventJson(PosReceipt receipt)
+        {
+            var sb = new StringBuilder(1024);
+            sb.Append('{');
+            sb.Append("\"branch_code\":").Append(JsonStr(receipt.BranchCode)).Append(',');
+            sb.Append("\"doc_no\":").Append(JsonStr(receipt.DocNo)).Append(',');
+            sb.Append("\"pos_code\":").Append(JsonStr(receipt.PosCode)).Append(',');
+            sb.Append("\"grand_total\":").Append(JsonNum(receipt.GrandTotal)).Append(',');
+            sb.Append("\"tender_code\":").Append(JsonStr(receipt.PaymentCode)).Append(',');
+            sb.Append("\"tender_ref\":").Append(JsonStr(receipt.PromptPayRef)).Append(',');
+            sb.Append("\"inserted_at\":").Append(JsonStr(FormatInsertedAt(receipt))).Append(',');
+            sb.Append("\"items\":[");
+
+            for (int i = 0; i < receipt.Items.Count; i++)
+            {
+                PosReceiptItem item = receipt.Items[i];
+                if (i > 0) sb.Append(',');
+                sb.Append('{');
+                sb.Append("\"product_code\":").Append(JsonStr(item.ProductCode)).Append(',');
+                sb.Append("\"qty\":").Append(JsonNum(item.Qty)).Append(',');
+                sb.Append("\"net_amt\":").Append(JsonNum(item.NetAmount));
+                sb.Append('}');
+            }
+
+            sb.Append(']');
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string FormatInsertedAt(PosReceipt receipt)
+        {
+            DateTime local = receipt.InsertDate.Date;
+
+            TimeSpan time;
+            if (TimeSpan.TryParse(receipt.InsertTime ?? "", out time))
+                local = local.Add(time);
+            else if (TimeSpan.TryParse(receipt.DocTime ?? "", out time))
+                local = local.Add(time);
+            else
+                local = local.Add(receipt.DocDate.TimeOfDay);
+
+            local = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+            var offset = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+            return offset.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture);
+        }
+
+        private static string JsonNum(decimal value)
+        {
+            return value.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
         /// <summary>Returns a JSON string literal (with surrounding quotes) for value.</summary>

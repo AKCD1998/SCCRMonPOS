@@ -1,42 +1,52 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 
 namespace SCCRMonPOS.Models
 {
+    [DataContract]
     public class PosReceipt
     {
-        public string   DocNo         { get; set; }  // e.g. S2605005002-0000850
-        public string   DocType       { get; set; }  // "1" = sale, "9" = return
-        public bool     IsReturn      { get; set; }
-        public string   BranchCode    { get; set; }
-        public string   PosCode       { get; set; }  // "001", "002"
-        public string   CashierCode   { get; set; }
-        public DateTime DocDate       { get; set; }
-        public string   DocTime       { get; set; }  // "HH:MM:SS" from AdaPos
-        public DateTime InsertDate    { get; set; }  // watermark — midnight of sale date
-        public string   InsertTime    { get; set; }  // watermark — "HH:MM:SS"
-        public decimal  GrandTotal    { get; set; }  // total paid after all discounts
-        public decimal  Discount      { get; set; }  // header-level discount
-        public decimal  CashAmount    { get; set; }  // FCShdMnyCsh
-        public decimal  ChangeGiven   { get; set; }  // FCShdChn
-        public string   PaymentCode   { get; set; }  // "001"=cash "013"=PromptPay
-        public string   PaymentName   { get; set; }
-        public string   PromptPayRef  { get; set; }  // QR payment reference if PromptPay
-        public string   OriginalDocNo { get; set; }  // returns only: the sale being reversed
+        [DataMember] public string DocNo { get; set; }
+        [DataMember] public string DocType { get; set; }
+        [DataMember] public bool IsReturn { get; set; }
+        [DataMember] public string BranchCode { get; set; }
+        [DataMember] public string PosCode { get; set; }
+        [DataMember] public string CashierCode { get; set; }
+        [DataMember] public DateTime DocDate { get; set; }
+        [DataMember] public string DocTime { get; set; }
+        [DataMember] public DateTime InsertDate { get; set; }
+        [DataMember] public string InsertTime { get; set; }
+        [DataMember] public decimal GrandTotal { get; set; }
+        [DataMember] public decimal Discount { get; set; }
+        [DataMember] public decimal CashAmount { get; set; }
+        [DataMember] public decimal ChangeGiven { get; set; }
+        [DataMember] public string PaymentCode { get; set; }
+        [DataMember] public string PaymentName { get; set; }
+        [DataMember] public string PromptPayRef { get; set; }
+        [DataMember] public string OriginalDocNo { get; set; }
+        [DataMember] public string HeaderTable { get; set; }
+        [DataMember] public string DetailTable { get; set; }
+        [DataMember] public string PaymentTable { get; set; }
+        [DataMember] public List<PosReceiptItem> Items { get; set; }
 
-        public List<PosReceiptItem> Items { get; set; } = new List<PosReceiptItem>();
+        public PosReceipt()
+        {
+            Items = new List<PosReceiptItem>();
+        }
     }
 
+    [DataContract]
     public class PosReceiptItem
     {
-        public int     Seq           { get; set; }
-        public string  ProductCode   { get; set; }
-        public string  ProductName   { get; set; }
-        public string  Barcode       { get; set; }
-        public decimal Qty           { get; set; }
-        public decimal UnitPrice     { get; set; }  // FCSdtSetPrice — actual charged price
-        public decimal NetAmount     { get; set; }  // FCSdtNet — use for points calculation
-        public decimal LineDiscount  { get; set; }
-        public string  PromotionCode { get; set; }
+        [DataMember] public int Seq { get; set; }
+        [DataMember] public string ProductCode { get; set; }
+        [DataMember] public string ProductName { get; set; }
+        [DataMember] public string Barcode { get; set; }
+        [DataMember] public decimal Qty { get; set; }
+        [DataMember] public decimal UnitPrice { get; set; }
+        [DataMember] public decimal NetAmount { get; set; }
+        [DataMember] public decimal LineDiscount { get; set; }
+        [DataMember] public string PromotionCode { get; set; }
     }
 }
