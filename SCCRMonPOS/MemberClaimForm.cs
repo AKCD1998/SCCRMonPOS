@@ -719,7 +719,7 @@ namespace SCCRMonPOS
             form.ShowDialog(this);
         }
 
-        private void OnEditMemberClick(object sender, EventArgs e)
+        private async void OnEditMemberClick(object sender, EventArgs e)
         {
             if (_selectedMember == null)
                 return;
@@ -736,15 +736,22 @@ namespace SCCRMonPOS
 
             SetStatus("", false);
 
-            var detail = new MemberDetail
+            MemberDetail detail;
+            try
             {
-                Id = _selectedMember.Id,
-                DisplayName = _selectedMember.DisplayName,
-                Phone = _selectedMember.Phone,
-                Email = _selectedMember.Email,
-                MemberCode = _selectedMember.MemberCode,
-                CurrentPoints = _selectedMember.CurrentPoints
-            };
+                detail = await _api.GetMemberAsync(_selectedMember.Id);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("โหลดข้อมูลสมาชิกไม่สำเร็จ: " + ex.Message, true);
+                return;
+            }
+
+            if (detail == null)
+            {
+                SetStatus("ไม่พบข้อมูลสมาชิก", true);
+                return;
+            }
 
             var form = new NewMemberForm(_api, detail);
             form.MemberSaved += delegate (MemberSearchResult updated)
