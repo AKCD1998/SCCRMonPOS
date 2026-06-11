@@ -119,9 +119,14 @@ namespace SCCRMonPOS
             _txtEmail.Text = m.Email       ?? "";
             _txtRemark.Text = m.Remark     ?? "";
 
-            if (m.Sex == "male"   || m.Sex == "1") _rdMale.Checked        = true;
-            else if (m.Sex == "female" || m.Sex == "2") _rdFemale.Checked  = true;
-            else                                        _rdUnspecified.Checked = true;
+            if (string.Equals(m.Sex, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.Sex, "male", StringComparison.OrdinalIgnoreCase))
+                _rdMale.Checked = true;
+            else if (string.Equals(m.Sex, "2", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(m.Sex, "female", StringComparison.OrdinalIgnoreCase))
+                _rdFemale.Checked = true;
+            else
+                _rdUnspecified.Checked = true;
 
             DateTime dob;
             if (!string.IsNullOrWhiteSpace(m.Dob) && DateTime.TryParse(m.Dob, out dob))
