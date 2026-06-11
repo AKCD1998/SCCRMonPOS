@@ -350,7 +350,19 @@ namespace SCCRMonPOS
             sb.Append("\"remark\":").Append(JsonStr(request.Remark));
             sb.Append('}');
 
-            string json = await PostJsonAsync("/api/members", sb.ToString(), _staffToken);
+            string body = sb.ToString();
+            string json;
+            try
+            {
+                json = await PostJsonAsync("/api/members", body, _staffToken);
+            }
+            catch (ApiException ex) when (IsHttp404(ex))
+            {
+                json = await PostJsonAsync("/api/sccrm/customers", body, _staffToken);
+                var customer = ParseCustomerWrapper(json);
+                if (customer != null) return MapCustomerToMemberSearchResult(customer);
+            }
+
             var results = ParseMemberSearchResults(json);
             if (results != null && results.Length > 0) return results[0];
 
@@ -536,6 +548,19 @@ namespace SCCRMonPOS
                 };
             }
             catch { return null; }
+        }
+
+        private static MemberSearchResult MapCustomerToMemberSearchResult(ApiCustomer customer)
+        {
+            return new MemberSearchResult
+            {
+                Id            = customer.Id,
+                DisplayName   = customer.FullName,
+                Phone         = customer.Phone,
+                Email         = customer.Email,
+                MemberCode    = customer.MemberCode,
+                CurrentPoints = customer.Balance
+            };
         }
 
         private static MemberSearchResult[] ParseMemberSearchResults(string json)
@@ -845,6 +870,13 @@ namespace SCCRMonPOS
                 return string.IsNullOrEmpty(dto?.Error) ? null : dto.Error;
             }
             catch { return null; }
+        }
+
+        private static bool IsHttp404(ApiException ex)
+        {
+            return ex != null &&
+                   ex.Message != null &&
+                   ex.Message.IndexOf("HTTP 404", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
 

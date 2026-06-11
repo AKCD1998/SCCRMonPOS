@@ -7,7 +7,7 @@ using SCCRMonPOS.Models;
 
 namespace SCCRMonPOS
 {
-    public sealed class MemberClaimForm : Form
+    public partial class MemberClaimForm : Form
     {
         private readonly ApiClient _api;
         private readonly AdaPosWatcher _watcher;
@@ -17,28 +17,8 @@ namespace SCCRMonPOS
         private PosReceipt _receipt;
         private MemberSearchResult _selectedMember;
 
-        private TextBox _txtReceiptNo;
-        private Button _btnLoadReceipt;
-        private ListView _lvItems;
-        private ImageList _lvItemsRowSizer;
-        private Label _lblItemsEmpty;
-        private Panel _itemsHost;
-        private Label _lblTotal;
-        private Label _lblPreviewPoints;
-        private TextBox _txtMemberSearch;
-        private Button _btnSearch;
-        private Button _btnNewMember;
-        private DataGridView _dgvResults;
-        private Label _lblMembersEmpty;
-        private Panel _membersHost;
-        private Panel _pnlMemberSummary;
-        private Label _lblMemberName;
-        private Label _lblMemberPoints;
-        private Label _lblStatus;
-        private Button _btnConfirm;
-        private Button _btnCancel;
-        private Button _btnEditMember;
-        private ContextMenuStrip _extraMenu;
+        // For Visual Studio Designer only — do not call at runtime
+        public MemberClaimForm() { InitializeComponent(); }
 
         public MemberClaimForm(
             ApiClient api,
@@ -47,410 +27,59 @@ namespace SCCRMonPOS
             string staffCode,
             PosReceipt prefilledReceipt = null)
         {
-            _api = api;
-            _watcher = watcher;
+            _api          = api;
+            _watcher      = watcher;
             _bahtPerPoint = bahtPerPoint > 0 ? bahtPerPoint : 10;
-            _staffCode = staffCode ?? "";
+            _staffCode    = staffCode ?? "";
 
-            BuildUi();
+            InitializeComponent();
+            WireEvents();
+            BuildExtraMenu();
+            RefreshEmptyStates();
 
             if (prefilledReceipt != null)
                 LoadReceipt(prefilledReceipt);
         }
 
-        private void BuildUi()
+        private void WireEvents()
         {
-            SuspendLayout();
-
-            Text = "SCCRM - สะสมแต้ม";
-            ClientSize = new Size(780, 590);
-            MinimumSize = new Size(760, 560);
-            FormBorderStyle = FormBorderStyle.Sizable;
-            MaximizeBox = true;
-            MinimizeBox = true;
-            TopMost = true;
-            StartPosition = FormStartPosition.CenterScreen;
-            ShowInTaskbar = false;
-            BackColor = Color.White;
-            Font = new Font("Tahoma", 8.75f);
-            AutoScaleMode = AutoScaleMode.Dpi;
-
-            const int left = 16;
-            const int contentWidth = 748;
-
-            var title = new Label
+            // VS Designer strips ListView column definitions on save — kept here
+            if (_lvItems.Columns.Count == 0)
             {
-                Text = "สะสมแต้ม CRM",
-                Font = new Font("Tahoma", 15f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(18, 92, 191),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Bounds = new Rectangle(left, 14, contentWidth, 30),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-
-            var navPanel = new Panel
-            {
-                Bounds = new Rectangle(left, 50, contentWidth, 34),
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            navPanel.Controls.Add(CreateTabButton("บันทึกสะสมแต้ม", 0, true, null));
-            navPanel.Controls.Add(CreateTabButton("ประวัติการสะสม", 1, false, OnComingSoonClick));
-            navPanel.Controls.Add(CreateTabButton("สมาชิก", 2, false, OnComingSoonClick));
-            navPanel.Controls.Add(CreateTabButton("รายงาน", 3, false, OnComingSoonClick));
-
-            var btnExtra = CreateTabButton("เมนูเพิ่มเติม", 4, false, OnExtraMenuClick);
-            btnExtra.BackColor = Color.FromArgb(18, 92, 191);
-            btnExtra.ForeColor = Color.White;
-            btnExtra.FlatAppearance.BorderColor = Color.FromArgb(18, 92, 191);
-            navPanel.Controls.Add(btnExtra);
-
-            BuildExtraMenu();
-
-            var sectionReceipt = CreateSectionLabel("เลขที่ใบเสร็จ", left, 96);
-            _txtReceiptNo = new TextBox
-            {
-                Bounds = new Rectangle(left, 120, 500, 28),
-                Font = new Font("Tahoma", 10f),
-                BorderStyle = BorderStyle.FixedSingle,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            _txtReceiptNo.KeyDown += delegate (object sender, KeyEventArgs e)
-            {
-                if (e.KeyCode == Keys.Enter)
-                {
-                    e.SuppressKeyPress = true;
-                    _ = LoadReceiptAsync();
-                }
-            };
-
-            _btnLoadReceipt = new Button
-            {
-                Text = "โหลด",
-                Bounds = new Rectangle(left + contentWidth - 88, 120, 88, 28),
-                Font = new Font("Tahoma", 9f),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            _btnLoadReceipt.FlatAppearance.BorderColor = Color.FromArgb(200, 208, 220);
-            _btnLoadReceipt.Click += async delegate { await LoadReceiptAsync(); };
-
-            var sectionItems = CreateSectionLabel("รายการสินค้า", left, 158);
-
-            _itemsHost = new Panel
-            {
-                Bounds = new Rectangle(left, 186, contentWidth, 72),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-
-            _lvItemsRowSizer = new ImageList();
-            _lvItemsRowSizer.ImageSize = new Size(1, 14);
-            _lvItemsRowSizer.ColorDepth = ColorDepth.Depth8Bit;
-
-            _lvItems = new ListView
-            {
-                Bounds = new Rectangle(0, 0, contentWidth, 72),
-                View = View.Details,
-                FullRowSelect = true,
-                GridLines = true,
-                HeaderStyle = ColumnHeaderStyle.Nonclickable,
-                MultiSelect = false,
-                BorderStyle = BorderStyle.None,
-                Font = new Font("Tahoma", 7.5f),
-                SmallImageList = _lvItemsRowSizer
-            };
-            _lvItems.Columns.Add("รายการ", 574);
-            _lvItems.Columns.Add("จำนวน", 52, HorizontalAlignment.Center);
-            _lvItems.Columns.Add("ยอดรวม", 98, HorizontalAlignment.Right);
-
-            _lblItemsEmpty = new Label
-            {
-                Text = "ยังไม่มีข้อมูลสินค้า",
-                AutoSize = false,
-                ForeColor = Color.FromArgb(160, 167, 180),
-                Font = new Font("Tahoma", 8.5f),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Bounds = new Rectangle(0, 22, contentWidth, 18),
-                BackColor = Color.Transparent
-            };
-            _itemsHost.Controls.Add(_lvItems);
-            _itemsHost.Controls.Add(_lblItemsEmpty);
-
-            _lblTotal = new Label
-            {
-                Text = "ยอดรวม: -",
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleRight,
-                Font = new Font("Tahoma", 10.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(32, 32, 32),
-                Bounds = new Rectangle(left + contentWidth - 180, 264, 180, 18),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-
-            _lblPreviewPoints = new Label
-            {
-                Text = "แต้มที่จะได้รับ: -",
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleRight,
-                Font = new Font("Tahoma", 10.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(24, 140, 52),
-                Bounds = new Rectangle(left + contentWidth - 180, 284, 180, 18),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-
-            var divider = new Panel
-            {
-                Bounds = new Rectangle(left, 308, contentWidth, 1),
-                BackColor = Color.FromArgb(220, 225, 232),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-
-            var sectionSearch = CreateSectionLabel("ค้นหาสมาชิก (เบอร์โทร / ชื่อ / อีเมล)", left, 320);
-            _txtMemberSearch = new TextBox
-            {
-                Bounds = new Rectangle(left, 344, 410, 26),
-                Font = new Font("Tahoma", 9.5f),
-                BorderStyle = BorderStyle.FixedSingle,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            _txtMemberSearch.KeyDown += delegate (object sender, KeyEventArgs e)
-            {
-                if (e.KeyCode == Keys.Enter)
-                {
-                    e.SuppressKeyPress = true;
-                    _ = SearchMembersAsync();
-                }
-            };
-
-            _btnSearch = new Button
-            {
-                Text = "ค้นหา",
-                Bounds = new Rectangle(left + contentWidth - 184, 344, 80, 26),
-                Font = new Font("Tahoma", 9f),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            _btnSearch.FlatAppearance.BorderColor = Color.FromArgb(200, 208, 220);
-            _btnSearch.Click += async delegate { await SearchMembersAsync(); };
-
-            _btnNewMember = new Button
-            {
-                Text = "+ สมาชิกใหม่",
-                Bounds = new Rectangle(left + contentWidth - 96, 344, 96, 26),
-                Font = new Font("Tahoma", 9f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(24, 140, 52),
-                ForeColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            _btnNewMember.FlatAppearance.BorderSize = 0;
-            _btnNewMember.Click += OnNewMemberClick;
-
-            _membersHost = new Panel
-            {
-                Bounds = new Rectangle(left, 382, contentWidth, 52),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
-            };
-
-            _dgvResults = new DataGridView
-            {
-                Bounds = new Rectangle(0, 0, contentWidth, 42),
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                AllowUserToResizeRows = false,
-                MultiSelect = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                RowHeadersVisible = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                BackgroundColor = Color.White,
-                BorderStyle = BorderStyle.None,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-                ColumnHeadersHeight = 24,
-                Font = new Font("Tahoma", 7.5f)
-            };
-            _dgvResults.EnableHeadersVisualStyles = false;
-            _dgvResults.ColumnHeadersDefaultCellStyle.BackColor = Color.White;
-            _dgvResults.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(38, 38, 38);
-            _dgvResults.ColumnHeadersDefaultCellStyle.Font = new Font("Tahoma", 8f, FontStyle.Bold);
-            _dgvResults.DefaultCellStyle.SelectionBackColor = Color.FromArgb(232, 241, 255);
-            _dgvResults.DefaultCellStyle.SelectionForeColor = Color.FromArgb(18, 92, 191);
-            _dgvResults.DefaultCellStyle.Font = new Font("Tahoma", 7.5f);
-            _dgvResults.RowTemplate.Height = 18;
-            _dgvResults.Columns.Add(new DataGridViewTextBoxColumn { Name = "Id", HeaderText = "ID", Visible = false });
-            _dgvResults.Columns.Add(new DataGridViewTextBoxColumn { Name = "MemberCode", HeaderText = "MemberCode", Visible = false });
-            _dgvResults.Columns.Add(new DataGridViewTextBoxColumn { Name = "DisplayName", HeaderText = "ชื่อสมาชิก", FillWeight = 58f });
-            _dgvResults.Columns.Add(new DataGridViewTextBoxColumn { Name = "Phone", HeaderText = "เบอร์โทร", FillWeight = 28f });
-            _dgvResults.Columns.Add(new DataGridViewTextBoxColumn { Name = "Points", HeaderText = "แต้ม", FillWeight = 14f });
-            _dgvResults.CellDoubleClick += OnGridDoubleClick;
-            _dgvResults.KeyDown += OnGridKeyDown;
+                _lvItems.Columns.Add("รายการ", 100); // width is set dynamically below
+                _lvItems.Columns.Add("จำนวน",  52,  HorizontalAlignment.Center);
+                _lvItems.Columns.Add("ยอดรวม", 98,  HorizontalAlignment.Right);
+            }
+            _lvItems.SizeChanged += (s, e) => FitItemsColumn();
+            FitItemsColumn();
+            _txtReceiptNo.KeyDown    += delegate (object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _ = LoadReceiptAsync(); } };
+            _btnLoadReceipt.Click    += async delegate { await LoadReceiptAsync(); };
+            _txtMemberSearch.KeyDown += delegate (object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _ = SearchMembersAsync(); } };
+            _btnSearch.Click         += async delegate { await SearchMembersAsync(); };
+            _btnNewMember.Click      += OnNewMemberClick;
+            _btnEditMember.Click     += OnEditMemberClick;
+            _btnCancel.Click         += delegate { Close(); };
+            _btnConfirm.Click        += async delegate { await ConfirmClaimAsync(); };
+            _dgvResults.CellDoubleClick  += OnGridDoubleClick;
+            _dgvResults.KeyDown          += OnGridKeyDown;
             _dgvResults.SelectionChanged += OnGridSelectionChanged;
-
-            _lblMembersEmpty = new Label
-            {
-                Text = "ยังไม่มีข้อมูลสมาชิก",
-                AutoSize = false,
-                ForeColor = Color.FromArgb(160, 167, 180),
-                Font = new Font("Tahoma", 8.5f),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Bounds = new Rectangle(0, 16, contentWidth, 18),
-                BackColor = Color.Transparent
-            };
-            _membersHost.Controls.Add(_dgvResults);
-            _membersHost.Controls.Add(_lblMembersEmpty);
-
-            _pnlMemberSummary = new Panel
-            {
-                Bounds = new Rectangle(left, 440, contentWidth, 32),
-                BackColor = Color.FromArgb(243, 248, 255),
-                Visible = false,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
-            };
-
-            _lblMemberName = new Label
-            {
-                Bounds = new Rectangle(10, 2, 470, 16),
-                Font = new Font("Tahoma", 9f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(18, 92, 191),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
-            };
-
-            _lblMemberPoints = new Label
-            {
-                Bounds = new Rectangle(10, 17, 470, 14),
-                ForeColor = Color.FromArgb(70, 70, 70),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
-            };
-
-            _btnEditMember = new Button
-            {
-                Text = "แก้ไขข้อมูลสมาชิก",
-                Bounds = new Rectangle(contentWidth - 144, 4, 136, 24),
-                Font = new Font("Tahoma", 8f),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                ForeColor = Color.FromArgb(18, 92, 191),
-                Visible = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            _btnEditMember.FlatAppearance.BorderColor = Color.FromArgb(18, 92, 191);
-            _btnEditMember.Click += OnEditMemberClick;
-
-            _pnlMemberSummary.Controls.Add(_lblMemberName);
-            _pnlMemberSummary.Controls.Add(_lblMemberPoints);
-            _pnlMemberSummary.Controls.Add(_btnEditMember);
-
-            _lblStatus = new Label
-            {
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Tahoma", 8.5f),
-                ForeColor = Color.FromArgb(180, 38, 38),
-                Bounds = new Rectangle(left, 478, contentWidth, 16),
-                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
-            };
-
-            _btnCancel = new Button
-            {
-                Text = "ยกเลิก",
-                Bounds = new Rectangle(left, 500, 112, 26),
-                Font = new Font("Tahoma", 9f),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                Anchor = AnchorStyles.Left | AnchorStyles.Bottom
-            };
-            _btnCancel.FlatAppearance.BorderColor = Color.FromArgb(200, 208, 220);
-            _btnCancel.Click += delegate { Close(); };
-
-            _btnConfirm = new Button
-            {
-                Text = "ยืนยันการสะสมแต้ม",
-                Bounds = new Rectangle(left + contentWidth - 188, 500, 188, 26),
-                Font = new Font("Tahoma", 9f, FontStyle.Bold),
-                Enabled = false,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(18, 92, 191),
-                ForeColor = Color.White,
-                Anchor = AnchorStyles.Right | AnchorStyles.Bottom
-            };
-            _btnConfirm.FlatAppearance.BorderSize = 0;
-            _btnConfirm.Click += async delegate { await ConfirmClaimAsync(); };
-
-            Controls.AddRange(new Control[]
-            {
-                title,
-                navPanel,
-                sectionReceipt,
-                _txtReceiptNo,
-                _btnLoadReceipt,
-                sectionItems,
-                _itemsHost,
-                _lblTotal,
-                _lblPreviewPoints,
-                divider,
-                sectionSearch,
-                _txtMemberSearch,
-                _btnSearch,
-                _btnNewMember,
-                _membersHost,
-                _pnlMemberSummary,
-                _lblStatus,
-                _btnCancel,
-                _btnConfirm
-            });
-
-            ResumeLayout(false);
-            RefreshEmptyStates();
+            _btnTabHistory.Click += OnComingSoonClick;
+            _btnTabMembers.Click += OnComingSoonClick;
+            _btnTabReports.Click += OnComingSoonClick;
+            _btnTabExtra.Click   += OnExtraMenuClick;
         }
 
-        private Label CreateSectionLabel(string text, int x, int y)
-        {
-            return new Label
-            {
-                Text = text,
-                Font = new Font("Tahoma", 11f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(40, 40, 40),
-                Bounds = new Rectangle(x, y, 420, 22)
-            };
-        }
+        private void _lvItems_SelectedIndexChanged(object sender, System.EventArgs e) { }
 
-        private Button CreateTabButton(string text, int index, bool active, EventHandler clickHandler)
-        {
-            int width;
-            int x;
-            if (index == 4)
-            {
-                width = 196;
-                x = 552;
-            }
-            else
-            {
-                width = 138;
-                x = index * 138;
-            }
 
-            var button = new Button
-            {
-                Text = text,
-                Bounds = new Rectangle(x, 0, width, 34),
-                Font = new Font("Tahoma", 8f, active ? FontStyle.Bold : FontStyle.Regular),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = active ? Color.White : Color.FromArgb(249, 251, 254),
-                ForeColor = active ? Color.FromArgb(40, 40, 40) : Color.FromArgb(90, 98, 110),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            button.FlatAppearance.BorderColor = Color.FromArgb(220, 225, 232);
-            button.FlatAppearance.MouseDownBackColor = button.BackColor;
-            button.FlatAppearance.MouseOverBackColor = button.BackColor;
-            if (clickHandler != null)
-                button.Click += clickHandler;
-            return button;
+
+        private void _dgvResults_CellContentClick(object sender, DataGridViewCellEventArgs e) { }
+        private void MemberClaimForm_Load(object sender, EventArgs e) { }
+
+        private void FitItemsColumn()
+        {
+            if (_lvItems.Columns.Count > 0)
+                _lvItems.Columns[0].Width = _lvItems.ClientSize.Width - 52 - 98;
         }
 
         private void BuildExtraMenu()
@@ -719,7 +348,7 @@ namespace SCCRMonPOS
             form.ShowDialog(this);
         }
 
-        private void OnEditMemberClick(object sender, EventArgs e)
+        private async void OnEditMemberClick(object sender, EventArgs e)
         {
             if (_selectedMember == null)
                 return;
@@ -734,17 +363,32 @@ namespace SCCRMonPOS
             if (!PromptPin("ใส่รหัสผ่านเพื่อแก้ไขข้อมูล", required))
                 return;
 
-            SetStatus("", false);
+            SetStatus("กำลังโหลดข้อมูลสมาชิก…", false, System.Drawing.Color.DimGray);
+            SetUiBusy(true);
 
-            var detail = new MemberDetail
+            MemberDetail detail = null;
+            try
             {
-                Id = _selectedMember.Id,
-                DisplayName = _selectedMember.DisplayName,
-                Phone = _selectedMember.Phone,
-                Email = _selectedMember.Email,
-                MemberCode = _selectedMember.MemberCode,
-                CurrentPoints = _selectedMember.CurrentPoints
-            };
+                detail = await _api.GetMemberAsync(_selectedMember.Id);
+            }
+            catch
+            {
+                detail = new MemberDetail
+                {
+                    Id = _selectedMember.Id,
+                    DisplayName = _selectedMember.DisplayName,
+                    Phone = _selectedMember.Phone,
+                    Email = _selectedMember.Email,
+                    MemberCode = _selectedMember.MemberCode,
+                    CurrentPoints = _selectedMember.CurrentPoints
+                };
+            }
+            finally
+            {
+                SetUiBusy(false);
+            }
+
+            SetStatus("", false);
 
             var form = new NewMemberForm(_api, detail);
             form.MemberSaved += delegate (MemberSearchResult updated)
@@ -1011,7 +655,8 @@ namespace SCCRMonPOS
                 return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
             if (raw.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 raw.IndexOf("already_claimed", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                raw.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0)
+                raw.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                raw.IndexOf("HTTP 409", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "บิลนี้ถูกสะสมแต้มไปแล้ว";
             if (raw.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "ไม่พบข้อมูลที่ใช้สำหรับสะสมแต้ม";

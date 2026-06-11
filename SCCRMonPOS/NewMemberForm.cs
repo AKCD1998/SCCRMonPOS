@@ -10,7 +10,7 @@ namespace SCCRMonPOS
     /// Pass an existing MemberDetail to enter edit mode; leave null for create mode.
     /// On success fires MemberSaved with the resulting MemberSearchResult.
     /// </summary>
-    public sealed class NewMemberForm : Form
+    public partial class NewMemberForm : Form
     {
         private readonly ApiClient    _api;
         private readonly MemberDetail _existing;   // null = create mode
@@ -18,18 +18,12 @@ namespace SCCRMonPOS
 
         public event Action<MemberSearchResult> MemberSaved;
 
-        private TextBox        _txtName;
-        private TextBox        _txtPhone;
-        private TextBox        _txtEmail;
-        private RadioButton    _rdMale;
-        private RadioButton    _rdFemale;
-        private RadioButton    _rdUnspecified;
-        private DateTimePicker _dtpDob;
-        private CheckBox       _chkDobUnknown;
-        private TextBox        _txtRemark;
-        private Label          _lblStatus;
-        private Button         _btnSave;
-        private Button         _btnCancel;
+        private Models.PharmacyMedRecord _medRecord;
+        private string _savedMemberId;
+        private PharmacyMedRecordForm _medRecordForm;
+
+        // For Visual Studio Designer only — do not call at runtime
+        public NewMemberForm() { InitializeComponent(); WireEvents(); }
 
         // ── Create mode ───────────────────────────────────────────────────────
         public NewMemberForm(ApiClient api) : this(api, null) { }
@@ -39,117 +33,83 @@ namespace SCCRMonPOS
         {
             _api      = api;
             _existing = existing;
-            BuildUi();
+            InitializeComponent();
+            WireEvents();
+            AddMedRecordButton();
+            if (IsEditMode) ApplyEditModeStyle();
             if (IsEditMode) Prefill(existing);
         }
 
-        private void BuildUi()
+        private void AddMedRecordButton()
         {
-            SuspendLayout();
+            // Shrink title to left half so the button fits on the right
+            lblTitle.Bounds    = new Rectangle(20, 12, 200, 28);
+            lblTitle.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            Text            = IsEditMode ? "SCCRM — แก้ไขข้อมูลสมาชิก" : "SCCRM — เพิ่มสมาชิกใหม่";
-            ClientSize      = new Size(420, 490);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox     = false;
-            MinimizeBox     = false;
-            TopMost         = true;
-            StartPosition   = FormStartPosition.CenterParent;
-            ShowInTaskbar   = false;
-            BackColor       = Color.White;
-            Font            = new Font("Tahoma", 9.5f);
-
-            int x = 20, w = 380;
-
-            var lblTitle = new Label
+            var btn = new Button
             {
-                Text      = IsEditMode ? "แก้ไขข้อมูลสมาชิก" : "เพิ่มสมาชิกใหม่",
-                AutoSize  = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font      = new Font("Tahoma", 13f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(16, 74, 132),
-                Bounds    = new Rectangle(x, 12, w, 28)
+                Text      = "เพิ่มข้อมูลเวชระเบียน",
+                Bounds    = new Rectangle(224, 12, 176, 26),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(243, 248, 255),
+                ForeColor = Color.FromArgb(18, 92, 191),
+                Font      = new Font("Tahoma", 8f),
+                Anchor    = AnchorStyles.Top | AnchorStyles.Right
             };
+            btn.FlatAppearance.BorderColor = Color.FromArgb(18, 92, 191);
+            btn.Click += OnMedRecordClick;
+            Controls.Add(btn);
+            btn.BringToFront();
+        }
 
-            var lblName = new Label { Text = "ชื่อ-นามสกุล *", Bounds = new Rectangle(x, 52, 140, 20) };
-            _txtName = new TextBox { Bounds = new Rectangle(x, 72, w, 24), MaxLength = 200 };
+        private void OnMedRecordClick(object sender, EventArgs e)
+        {
+            var screen = System.Windows.Forms.Screen.FromControl(this).WorkingArea;
 
-            var lblPhone = new Label { Text = "เบอร์โทรศัพท์ *", Bounds = new Rectangle(x, 106, 140, 20) };
-            _txtPhone = new TextBox { Bounds = new Rectangle(x, 126, 200, 24), MaxLength = 20 };
-
-            var lblEmail = new Label { Text = "อีเมล", Bounds = new Rectangle(x, 160, 80, 20) };
-            _txtEmail = new TextBox { Bounds = new Rectangle(x, 180, w, 24), MaxLength = 100 };
-
-            var lblSex = new Label { Text = "เพศ", Bounds = new Rectangle(x, 214, 60, 20) };
-            _rdMale        = new RadioButton { Text = "ชาย",     Bounds = new Rectangle(x,       234, 70, 22), Checked = true };
-            _rdFemale      = new RadioButton { Text = "หญิง",    Bounds = new Rectangle(x + 74,  234, 70, 22) };
-            _rdUnspecified = new RadioButton { Text = "ไม่ระบุ", Bounds = new Rectangle(x + 148, 234, 80, 22) };
-
-            var lblDob = new Label { Text = "วันเกิด", Bounds = new Rectangle(x, 266, 80, 20) };
-            _dtpDob = new DateTimePicker
+            // If already open, re-snap both windows and focus the med record form
+            if (_medRecordForm != null && !_medRecordForm.IsDisposed)
             {
-                Bounds = new Rectangle(x, 286, 200, 24),
-                Format = DateTimePickerFormat.Short,
-                Value  = DateTime.Today.AddYears(-25)
-            };
-            _chkDobUnknown = new CheckBox
-            {
-                Text    = "ไม่ทราบ",
-                Bounds  = new Rectangle(x + 210, 287, 80, 22),
-                Checked = true
-            };
+                SnapSideBySide(screen);
+                _medRecordForm.Focus();
+                return;
+            }
+
+            string memberId = _existing?.Id ?? _savedMemberId ?? "";
+            _medRecordForm = new PharmacyMedRecordForm(memberId, _medRecord);
+            _medRecordForm.RecordSaved += rec => _medRecord = rec;
+            _medRecordForm.StartPosition = FormStartPosition.Manual;
+
+            SnapSideBySide(screen);
+            _medRecordForm.Show(this);
+        }
+
+        private void SnapSideBySide(System.Drawing.Rectangle screen)
+        {
+            // Snap this form to the left, med record form to the right
+            int gap    = 10;
+            int leftX  = screen.Left + 20;
+            int rightX = leftX + this.Width + gap;
+            int thisY  = screen.Top + Math.Max(0, (screen.Height - this.Height) / 2);
+            int medY   = screen.Top + Math.Max(0, (screen.Height - (_medRecordForm?.Height ?? 660)) / 2);
+
+            this.Location = new System.Drawing.Point(leftX, thisY);
+            if (_medRecordForm != null && !_medRecordForm.IsDisposed)
+                _medRecordForm.Location = new System.Drawing.Point(rightX, medY);
+        }
+
+        private void WireEvents()
+        {
             _chkDobUnknown.CheckedChanged += (s, e) => _dtpDob.Enabled = !_chkDobUnknown.Checked;
-            _dtpDob.Enabled = false;
-
-            var lblRmk = new Label { Text = "หมายเหตุ", Bounds = new Rectangle(x, 320, 100, 20) };
-            _txtRemark = new TextBox { Bounds = new Rectangle(x, 340, w, 22), MaxLength = 200 };
-
-            _lblStatus = new Label
-            {
-                AutoSize  = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font      = new Font("Tahoma", 9f),
-                ForeColor = Color.FromArgb(120, 120, 120),
-                Bounds    = new Rectangle(x, 374, w, 22),
-                Text      = "* จำเป็นต้องกรอก"
-            };
-
-            _btnCancel = new Button
-            {
-                Text                  = "ยกเลิก",
-                Bounds                = new Rectangle(x, 406, 100, 32),
-                UseVisualStyleBackColor = true
-            };
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+            _btnSave.Click   += async (s, e) => await SaveAsync();
+        }
 
-            string saveLabel = IsEditMode ? "บันทึกการแก้ไข" : "บันทึกสมาชิก";
-            _btnSave = new Button
-            {
-                Text      = saveLabel,
-                Bounds    = new Rectangle(x + w - 144, 406, 148, 32),
-                BackColor = IsEditMode ? Color.FromArgb(140, 80, 0) : Color.FromArgb(16, 74, 132),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
-            };
-            _btnSave.FlatAppearance.BorderSize = 0;
-            _btnSave.Click += async (s, e) => await SaveAsync();
-
-            AcceptButton = _btnSave;
-            CancelButton = _btnCancel;
-
-            Controls.AddRange(new Control[]
-            {
-                lblTitle,
-                lblName, _txtName,
-                lblPhone, _txtPhone,
-                lblEmail, _txtEmail,
-                lblSex, _rdMale, _rdFemale, _rdUnspecified,
-                lblDob, _dtpDob, _chkDobUnknown,
-                lblRmk, _txtRemark,
-                _lblStatus,
-                _btnCancel, _btnSave
-            });
-
-            ResumeLayout(false);
+        private void ApplyEditModeStyle()
+        {
+            Text           = "SCCRM — แก้ไขข้อมูลสมาชิก";
+            lblTitle.Text  = "แก้ไขข้อมูลสมาชิก";
+            _btnSave.Text  = "บันทึกการแก้ไข";
+            _btnSave.BackColor = Color.FromArgb(140, 80, 0);
         }
 
         private void Prefill(MemberDetail m)
@@ -159,9 +119,9 @@ namespace SCCRMonPOS
             _txtEmail.Text = m.Email       ?? "";
             _txtRemark.Text = m.Remark     ?? "";
 
-            if (m.Sex == "1")      _rdMale.Checked        = true;
-            else if (m.Sex == "2") _rdFemale.Checked      = true;
-            else                   _rdUnspecified.Checked = true;
+            if (m.Sex == "male"   || m.Sex == "1") _rdMale.Checked        = true;
+            else if (m.Sex == "female" || m.Sex == "2") _rdFemale.Checked  = true;
+            else                                        _rdUnspecified.Checked = true;
 
             DateTime dob;
             if (!string.IsNullOrWhiteSpace(m.Dob) && DateTime.TryParse(m.Dob, out dob))
@@ -183,7 +143,7 @@ namespace SCCRMonPOS
             SetStatus(IsEditMode ? "กำลังบันทึกการแก้ไข…" : "กำลังบันทึก…", false, Color.DimGray);
             _btnSave.Enabled = false;
 
-            string sex = _rdMale.Checked ? "1" : (_rdFemale.Checked ? "2" : "");
+            string sex = _rdMale.Checked ? "male" : (_rdFemale.Checked ? "female" : "");
             string dob = _chkDobUnknown.Checked ? null : _dtpDob.Value.ToString("yyyy-MM-dd");
 
             var request = new CreateMemberRequest

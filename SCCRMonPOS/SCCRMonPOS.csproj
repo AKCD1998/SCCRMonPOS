@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
-          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
-
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -16,7 +14,6 @@
     <Deterministic>true</Deterministic>
     <ApplicationIcon />
   </PropertyGroup>
-
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
@@ -27,7 +24,6 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>pdbonly</DebugType>
@@ -37,7 +33,6 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
@@ -54,31 +49,52 @@
     <Reference Include="System.Drawing" />
     <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
-
   <ItemGroup>
     <Compile Include="AdaPosWatcher.cs" />
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlobalHotKeyManager.cs" />
-    <Compile Include="MemberClaimForm.cs" />
-    <Compile Include="NewMemberForm.cs" />
-    <Compile Include="MemberPointForm.cs" />
+    <Compile Include="MemberClaimForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="MemberClaimForm.Designer.cs">
+      <DependentUpon>MemberClaimForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="PharmacyMedRecordForm.cs" />
+    <Compile Include="NewMemberForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="NewMemberForm.Designer.cs">
+      <DependentUpon>NewMemberForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="MemberPointForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ProductEligibilityClient.cs" />
     <Compile Include="OfflineQueue.cs" />
     <Compile Include="StaffAuthManager.cs" />
-    <Compile Include="StaffLoginForm.cs" />
+    <Compile Include="StaffLoginForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="StaffLoginForm.Designer.cs">
+      <DependentUpon>StaffLoginForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="ScannerInputService.cs" />
     <Compile Include="ReceiptWorkflowStore.cs" />
     <Compile Include="TrayAppContext.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="Models\PharmacyMedRecord.cs" />
     <Compile Include="Models\Member.cs" />
     <Compile Include="Models\PosReceipt.cs" />
     <Compile Include="Models\TransactionLog.cs" />
     <Compile Include="TransactionRepository.cs" />
   </ItemGroup>
-
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-
+  <ItemGroup>
+    <EmbeddedResource Include="MemberClaimForm.resx">
+      <DependentUpon>MemberClaimForm.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
