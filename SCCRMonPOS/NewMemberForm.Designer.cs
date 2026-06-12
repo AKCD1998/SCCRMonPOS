@@ -107,15 +107,16 @@ namespace SCCRMonPOS
             //
             // lblDob
             //
-            this.lblDob.Bounds = new System.Drawing.Rectangle(20, 266, 80, 20);
+            this.lblDob.Bounds = new System.Drawing.Rectangle(20, 266, 160, 20);
             this.lblDob.Name   = "lblDob";
-            this.lblDob.Text   = "วันเกิด";
+            this.lblDob.Text   = "วันเกิด (วว/ดด/พ.ศ)";
             //
             // _dtpDob
             //
             this._dtpDob.Bounds  = new System.Drawing.Rectangle(20, 286, 200, 24);
+            this._dtpDob.CustomFormat = "dd / MM / yyyy";
             this._dtpDob.Enabled = false;
-            this._dtpDob.Format  = System.Windows.Forms.DateTimePickerFormat.Short;
+            this._dtpDob.Format  = System.Windows.Forms.DateTimePickerFormat.Custom;
             this._dtpDob.Name    = "_dtpDob";
             this._dtpDob.Value   = new System.DateTime(2000, 1, 1);
             //

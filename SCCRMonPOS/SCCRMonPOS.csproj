@@ -59,7 +59,9 @@
     <Compile Include="MemberClaimForm.Designer.cs">
       <DependentUpon>MemberClaimForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="PharmacyMedRecordForm.cs" />
+    <Compile Include="PharmacyMedRecordForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="NewMemberForm.cs">
       <SubType>Form</SubType>
     </Compile>

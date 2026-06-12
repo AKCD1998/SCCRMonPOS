@@ -2,6 +2,7 @@ using System;
 using System.Configuration;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using SCCRMonPOS.Models;
 
@@ -32,6 +33,7 @@ namespace SCCRMonPOS
         private readonly string _runtimeLogPath;
         private readonly ReceiptWatermark _initialWatcherWatermark;
         private readonly int _bahtPerPoint;
+        private readonly string _internalApiToken;
 
         // Latest completed receipt — used to pre-fill MemberClaimForm (never auto-shown).
         private PosReceipt      _standingByReceipt;
@@ -54,6 +56,7 @@ namespace SCCRMonPOS
             _watermarkStore           = new ReceiptWatermarkStore(_dataFolder);
             _watcherDiagnosticsEnabled = ReadBool("WatcherDiagnosticsEnabled", true);
             _bahtPerPoint             = ReadInt("BahtPerPoint", 10);
+            _internalApiToken         = ConfigurationManager.AppSettings["SccrmInternalApiToken"] ?? "";
             _runtimeLogPath           = Path.Combine(_dataFolder, "runtime.log");
             _initialWatcherWatermark  = LoadOrCreateWatcherWatermark();
 
@@ -164,10 +167,51 @@ namespace SCCRMonPOS
 
         private void OnReturnDetected(object sender, PosReceipt receipt)
         {
-            LogRuntime("Return detected: doc=" + (receipt?.DocNo ?? "-"));
+            LogRuntime(
+                "Return detected: doc=" + (receipt?.DocNo ?? "-") +
+                ", original=" + (receipt?.OriginalDocNo ?? "-") +
+                ", branch=" + (receipt?.BranchCode ?? "-") +
+                ", total=" + (receipt == null ? "-" : receipt.GrandTotal.ToString("F2")));
             AdvanceWatermark(receipt);
             lock (_receiptLock)
                 _standingByReceipt = null;
+            _ = Task.Run(async () => await ProcessRefundAsync(receipt));
+        }
+
+        private async Task ProcessRefundAsync(PosReceipt receipt)
+        {
+            if (receipt == null)
+            {
+                LogRuntime("Refund sync skipped: receipt is null.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_internalApiToken))
+            {
+                LogRuntime("Refund sync skipped: SccrmInternalApiToken is not configured.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(receipt.OriginalDocNo))
+            {
+                LogRuntime("Refund sync skipped: original sale bill is missing for refund " + (receipt.DocNo ?? "-"));
+                return;
+            }
+
+            try
+            {
+                RefundRegistrationResult result = await _api.RegisterRefundEventAsync(receipt, _internalApiToken);
+                LogRuntime(
+                    "Refund sync result: refund=" + (result.RefundDocNo ?? receipt.DocNo ?? "-") +
+                    ", original=" + (result.OriginalDocNo ?? receipt.OriginalDocNo ?? "-") +
+                    ", status=" + (result.ReversalStatus ?? "-") +
+                    ", points=" + result.PointsReversed.ToString() +
+                    (string.IsNullOrWhiteSpace(result.Reason) ? "" : ", reason=" + result.Reason));
+            }
+            catch (Exception ex)
+            {
+                LogRuntime("Refund sync failed for " + (receipt.DocNo ?? "-") + ": " + ex.Message);
+            }
         }
 
         private void AdvanceWatermark(PosReceipt receipt)

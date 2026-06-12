@@ -16,6 +16,7 @@ namespace SCCRMonPOS
 
         private PosReceipt _receipt;
         private MemberSearchResult _selectedMember;
+        private MemberDetail _selectedMemberDetail;
 
         // For Visual Studio Designer only — do not call at runtime
         public MemberClaimForm() { InitializeComponent(); }
@@ -293,6 +294,7 @@ namespace SCCRMonPOS
                 MemberCode = row.Cells["MemberCode"].Value != null ? row.Cells["MemberCode"].Value.ToString() : "",
                 CurrentPoints = int.TryParse(row.Cells["Points"].Value != null ? row.Cells["Points"].Value.ToString() : "0", out points) ? points : 0
             };
+            _selectedMemberDetail = null;
 
             ShowMemberSummary(_selectedMember);
             UpdateConfirmButton();
@@ -301,6 +303,7 @@ namespace SCCRMonPOS
         private void ClearMemberSelection()
         {
             _selectedMember = null;
+            _selectedMemberDetail = null;
             ShowMemberSummary(null);
             UpdateConfirmButton();
         }
@@ -367,25 +370,31 @@ namespace SCCRMonPOS
             SetUiBusy(true);
 
             MemberDetail detail = null;
+            string loadError = null;
             try
             {
                 detail = await _api.GetMemberAsync(_selectedMember.Id);
+                detail = MergeMemberDetail(detail, _selectedMember);
+                _selectedMemberDetail = detail;
             }
-            catch
+            catch (Exception ex)
             {
-                detail = new MemberDetail
+                loadError = ex.Message;
+                if (_selectedMemberDetail != null &&
+                    string.Equals(_selectedMemberDetail.Id, _selectedMember.Id, StringComparison.Ordinal))
                 {
-                    Id = _selectedMember.Id,
-                    DisplayName = _selectedMember.DisplayName,
-                    Phone = _selectedMember.Phone,
-                    Email = _selectedMember.Email,
-                    MemberCode = _selectedMember.MemberCode,
-                    CurrentPoints = _selectedMember.CurrentPoints
-                };
+                    detail = MergeMemberDetail(_selectedMemberDetail, _selectedMember);
+                }
             }
             finally
             {
                 SetUiBusy(false);
+            }
+
+            if (detail == null)
+            {
+                SetStatus("โหลดข้อมูลสมาชิกไม่สำเร็จ: " + (loadError ?? "ไม่ทราบสาเหตุ"), true);
+                return;
             }
 
             SetStatus("", false);
@@ -394,6 +403,9 @@ namespace SCCRMonPOS
             form.MemberSaved += delegate (MemberSearchResult updated)
             {
                 _selectedMember = updated;
+                _selectedMemberDetail = form.SavedDetail != null
+                    ? MergeMemberDetail(form.SavedDetail, updated)
+                    : MergeMemberDetail(_selectedMemberDetail, updated);
                 ShowMemberSummary(updated);
 
                 foreach (DataGridViewRow row in _dgvResults.Rows)
@@ -594,6 +606,29 @@ namespace SCCRMonPOS
         {
             _lblStatus.ForeColor = color ?? (isError ? Color.FromArgb(180, 38, 38) : Color.FromArgb(70, 70, 70));
             _lblStatus.Text = text;
+        }
+
+        private static MemberDetail MergeMemberDetail(MemberDetail detail, MemberSearchResult summary)
+        {
+            if (detail == null && summary == null)
+                return null;
+
+            return new MemberDetail
+            {
+                Id            = !string.IsNullOrWhiteSpace(detail?.Id) ? detail.Id : summary?.Id,
+                DisplayName   = !string.IsNullOrWhiteSpace(detail?.DisplayName) ? detail.DisplayName : summary?.DisplayName,
+                FirstName     = detail?.FirstName,
+                LastName      = detail?.LastName,
+                Phone         = !string.IsNullOrWhiteSpace(detail?.Phone) ? detail.Phone : summary?.Phone,
+                Email         = !string.IsNullOrWhiteSpace(detail?.Email) ? detail.Email : summary?.Email,
+                MemberCode    = !string.IsNullOrWhiteSpace(detail?.MemberCode) ? detail.MemberCode : summary?.MemberCode,
+                CurrentPoints = detail != null && detail.CurrentPoints > 0 ? detail.CurrentPoints : (summary != null ? summary.CurrentPoints : 0),
+                Sex           = detail?.Sex,
+                Dob           = detail?.Dob,
+                Remark        = detail?.Remark,
+                ThaiId        = detail?.ThaiId,
+                PharmacyMedRecord = detail?.PharmacyMedRecord
+            };
         }
 
         private int CalcPoints(decimal amount)

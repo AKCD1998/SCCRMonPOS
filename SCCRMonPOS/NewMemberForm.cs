@@ -17,6 +17,7 @@ namespace SCCRMonPOS
         private bool IsEditMode { get { return _existing != null; } }
 
         public event Action<MemberSearchResult> MemberSaved;
+        public MemberDetail SavedDetail { get; private set; }
 
         private Models.PharmacyMedRecord _medRecord;
         private string _savedMemberId;
@@ -33,6 +34,7 @@ namespace SCCRMonPOS
         {
             _api      = api;
             _existing = existing;
+            _medRecord = existing != null ? existing.PharmacyMedRecord : null;
             InitializeComponent();
             WireEvents();
             AddMedRecordButton();
@@ -42,14 +44,14 @@ namespace SCCRMonPOS
 
         private void AddMedRecordButton()
         {
-            // Shrink title to left half so the button fits on the right
-            lblTitle.Bounds    = new Rectangle(20, 12, 200, 28);
+            // Leave enough room on the right for the longer med-record button label
+            lblTitle.Bounds    = new Rectangle(20, 12, 170, 28);
             lblTitle.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             var btn = new Button
             {
-                Text      = "เพิ่มข้อมูลเวชระเบียน",
-                Bounds    = new Rectangle(224, 12, 176, 26),
+                Text      = "เพิ่มข้อมูลเวชระเบียน/ขย.10-ขย.11",
+                Bounds    = new Rectangle(192, 12, 208, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(243, 248, 255),
                 ForeColor = Color.FromArgb(18, 92, 191),
@@ -153,12 +155,13 @@ namespace SCCRMonPOS
 
             var request = new CreateMemberRequest
             {
-                Name   = name,
-                Phone  = phone,
-                Email  = _txtEmail.Text.Trim(),
-                Sex    = sex,
-                Dob    = dob,
-                Remark = _txtRemark.Text.Trim()
+                Name = name,
+                Phone = phone,
+                Email = _txtEmail.Text.Trim(),
+                Sex = sex,
+                Dob = dob,
+                Remark = _txtRemark.Text.Trim(),
+                PharmacyMedRecord = _medRecord
             };
 
             MemberSearchResult result = null;
@@ -176,6 +179,30 @@ namespace SCCRMonPOS
                 SetStatus(MapError(errorMsg), true);
                 _btnSave.Enabled = true;
                 return;
+            }
+
+            if (IsEditMode)
+            {
+                SavedDetail = new MemberDetail
+                {
+                    Id = _existing.Id,
+                    DisplayName = name,
+                    FirstName = _existing.FirstName,
+                    LastName = _existing.LastName,
+                    Phone = phone,
+                    Email = _txtEmail.Text.Trim(),
+                    MemberCode = _existing.MemberCode,
+                    CurrentPoints = _existing.CurrentPoints,
+                    Sex = sex,
+                    Dob = dob,
+                    Remark = _txtRemark.Text.Trim(),
+                    ThaiId = _existing.ThaiId,
+                    PharmacyMedRecord = _medRecord
+                };
+            }
+            else
+            {
+                _savedMemberId = result != null ? result.Id : null;
             }
 
             MemberSaved?.Invoke(result);

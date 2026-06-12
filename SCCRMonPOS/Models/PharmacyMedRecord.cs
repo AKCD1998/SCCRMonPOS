@@ -5,6 +5,11 @@ namespace SCCRMonPOS.Models
         public string MemberId { get; set; }
 
         // 5 — ข้อมูลสุขภาพพื้นฐาน
+        public string PidDocumentType             { get; set; }
+        public string PidDocumentNumberRaw        { get; set; }
+        public string PidDocumentNumberNormalized { get; set; }
+
+        // 5 — ข้อมูลสุขภาพพื้นฐาน
         public string WeightKg     { get; set; }
         public string HeightCm     { get; set; }
         public string BpSystolic   { get; set; }

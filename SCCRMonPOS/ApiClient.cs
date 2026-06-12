@@ -86,30 +86,42 @@ namespace SCCRMonPOS
         public int    NewPointsBalance { get; set; }
     }
 
+    public class RefundRegistrationResult
+    {
+        public bool Ok { get; set; }
+        public string RefundDocNo { get; set; }
+        public string OriginalDocNo { get; set; }
+        public string ReversalStatus { get; set; }
+        public int PointsReversed { get; set; }
+        public string Reason { get; set; }
+    }
+
     public class CreateMemberRequest
     {
-        public string Name   { get; set; }
-        public string Phone  { get; set; }
-        public string Email  { get; set; }
-        public string Sex    { get; set; }
-        public string Dob    { get; set; }
+        public string Name { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string Sex { get; set; }
+        public string Dob { get; set; }
         public string Remark { get; set; }
+        public PharmacyMedRecord PharmacyMedRecord { get; set; }
     }
 
     public class MemberDetail
     {
-        public string Id            { get; set; }
-        public string DisplayName   { get; set; }
-        public string FirstName     { get; set; }
-        public string LastName      { get; set; }
-        public string Phone         { get; set; }
-        public string Email         { get; set; }
-        public string MemberCode    { get; set; }
+        public string Id { get; set; }
+        public string DisplayName { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string MemberCode { get; set; }
         public int    CurrentPoints { get; set; }
-        public string Sex           { get; set; }
-        public string Dob           { get; set; }
-        public string Remark        { get; set; }
-        public string ThaiId        { get; set; }
+        public string Sex { get; set; }
+        public string Dob { get; set; }
+        public string Remark { get; set; }
+        public string ThaiId { get; set; }
+        public PharmacyMedRecord PharmacyMedRecord { get; set; }
     }
 
     // ── Exceptions ──────────────────────────────────────────────────────────────
@@ -320,18 +332,8 @@ namespace SCCRMonPOS
             if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
             if (request == null) throw new ApiException("request is required.");
 
-            var sb = new StringBuilder(512);
-            sb.Append('{');
-            sb.Append("\"name\":"  ).Append(JsonStr(request.Name)).Append(',');
-            sb.Append("\"phone\":" ).Append(JsonStr(request.Phone)).Append(',');
-            sb.Append("\"email\":" ).Append(JsonStr(request.Email)).Append(',');
-            sb.Append("\"sex\":"   ).Append(JsonStr(request.Sex)).Append(',');
-            sb.Append("\"dob\":"   ).Append(JsonStr(request.Dob)).Append(',');
-            sb.Append("\"remark\":").Append(JsonStr(request.Remark));
-            sb.Append('}');
-
             string json = await PutJsonWithPosKeyAsync(
-                "/api/members/" + Uri.EscapeDataString(memberId), sb.ToString());
+                "/api/members/" + Uri.EscapeDataString(memberId), BuildCreateOrUpdateMemberJson(request));
             return ParseMemberSearchResultFromApiResponse(json);
         }
 
@@ -340,17 +342,7 @@ namespace SCCRMonPOS
             RequireValidToken();
             if (request == null) throw new ApiException("request is required.");
 
-            var sb = new StringBuilder(512);
-            sb.Append('{');
-            sb.Append("\"name\":"  ).Append(JsonStr(request.Name)).Append(',');
-            sb.Append("\"phone\":" ).Append(JsonStr(request.Phone)).Append(',');
-            sb.Append("\"email\":" ).Append(JsonStr(request.Email)).Append(',');
-            sb.Append("\"sex\":"   ).Append(JsonStr(request.Sex)).Append(',');
-            sb.Append("\"dob\":"   ).Append(JsonStr(request.Dob)).Append(',');
-            sb.Append("\"remark\":").Append(JsonStr(request.Remark));
-            sb.Append('}');
-
-            string body = sb.ToString();
+            string body = BuildCreateOrUpdateMemberJson(request);
             string json;
             try
             {
@@ -399,6 +391,26 @@ namespace SCCRMonPOS
                 "/internal/crm/pos/sale-event", body, internalToken.Trim());
         }
 
+        public async Task<RefundRegistrationResult> RegisterRefundEventAsync(PosReceipt receipt, string internalToken)
+        {
+            if (receipt == null)
+                throw new ApiException("receipt is required.");
+            if (string.IsNullOrWhiteSpace(receipt.BranchCode))
+                throw new ApiException("branchCode is required.");
+            if (string.IsNullOrWhiteSpace(receipt.DocNo))
+                throw new ApiException("refund docNo is required.");
+            if (string.IsNullOrWhiteSpace(receipt.OriginalDocNo))
+                throw new ApiException("original sale docNo is required.");
+            if (string.IsNullOrWhiteSpace(internalToken))
+                throw new ApiException("Refund sync internal token is not configured.");
+
+            string json = await PostJsonWithInternalTokenAsync(
+                "/internal/crm/pos/refunds",
+                BuildRefundEventJson(receipt),
+                internalToken.Trim());
+            return ParseRefundRegistrationResult(json);
+        }
+
         // ── New loyalty flow helpers ────────────────────────────────────────────
 
         [DataContract] private sealed class MemberSearchDto
@@ -427,6 +439,27 @@ namespace SCCRMonPOS
             [DataMember(Name = "displayName")] public string DisplayName { get; set; }
         }
 
+        [DataContract] private sealed class RefundRegistrationResponseDto
+        {
+            [DataMember(Name = "ok")] public bool Ok { get; set; }
+            [DataMember(Name = "accepted")] public int Accepted { get; set; }
+            [DataMember(Name = "results")] public RefundResultDto[] Results { get; set; }
+        }
+
+        [DataContract] private sealed class RefundResultDto
+        {
+            [DataMember(Name = "refundDocNo")] public string RefundDocNo { get; set; }
+            [DataMember(Name = "originalDocNo")] public string OriginalDocNo { get; set; }
+            [DataMember(Name = "reversal")] public RefundReversalDto Reversal { get; set; }
+        }
+
+        [DataContract] private sealed class RefundReversalDto
+        {
+            [DataMember(Name = "status")] public string Status { get; set; }
+            [DataMember(Name = "pointsReversed")] public int PointsReversed { get; set; }
+            [DataMember(Name = "reason")] public string Reason { get; set; }
+        }
+
         [DataContract] private sealed class MemberDetailDto
         {
             [DataMember(Name = "id")]             public string Id            { get; set; }
@@ -446,6 +479,63 @@ namespace SCCRMonPOS
             [DataMember(Name = "thai_id")]        public string ThaiId        { get; set; }
             [DataMember(Name = "created_at")]     public string CreatedAt     { get; set; }
             [DataMember(Name = "updated_at")]     public string UpdatedAt     { get; set; }
+            [DataMember(Name = "pharmacy_med_record")] public PharmacyMedRecordDto PharmacyMedRecord { get; set; }
+        }
+
+        [DataContract] private sealed class PharmacyMedRecordDto
+        {
+            [DataMember(Name = "memberId")] public string MemberId { get; set; }
+            [DataMember(Name = "member_id")] public string MemberIdSnake { get; set; }
+            [DataMember(Name = "pidDocumentType")] public string PidDocumentType { get; set; }
+            [DataMember(Name = "pid_document_type")] public string PidDocumentTypeSnake { get; set; }
+            [DataMember(Name = "pidDocumentNumberRaw")] public string PidDocumentNumberRaw { get; set; }
+            [DataMember(Name = "pid_document_number_raw")] public string PidDocumentNumberRawSnake { get; set; }
+            [DataMember(Name = "pidDocumentNumberNormalized")] public string PidDocumentNumberNormalized { get; set; }
+            [DataMember(Name = "pid_document_number_normalized")] public string PidDocumentNumberNormalizedSnake { get; set; }
+            [DataMember(Name = "weightKg")] public decimal? WeightKg { get; set; }
+            [DataMember(Name = "weight_kg")] public decimal? WeightKgSnake { get; set; }
+            [DataMember(Name = "heightCm")] public decimal? HeightCm { get; set; }
+            [DataMember(Name = "height_cm")] public decimal? HeightCmSnake { get; set; }
+            [DataMember(Name = "bpSystolic")] public int? BpSystolic { get; set; }
+            [DataMember(Name = "bp_systolic")] public int? BpSystolicSnake { get; set; }
+            [DataMember(Name = "bpDiastolic")] public int? BpDiastolic { get; set; }
+            [DataMember(Name = "bp_diastolic")] public int? BpDiastolicSnake { get; set; }
+            [DataMember(Name = "bloodType")] public string BloodType { get; set; }
+            [DataMember(Name = "blood_type")] public string BloodTypeSnake { get; set; }
+            [DataMember(Name = "bloodRh")] public string BloodRh { get; set; }
+            [DataMember(Name = "blood_rh")] public string BloodRhSnake { get; set; }
+            [DataMember(Name = "hasDiabetes")] public bool HasDiabetes { get; set; }
+            [DataMember(Name = "has_diabetes")] public bool HasDiabetesSnake { get; set; }
+            [DataMember(Name = "hasHypertension")] public bool HasHypertension { get; set; }
+            [DataMember(Name = "has_hypertension")] public bool HasHypertensionSnake { get; set; }
+            [DataMember(Name = "hasHyperlipidemia")] public bool HasHyperlipidemia { get; set; }
+            [DataMember(Name = "has_hyperlipidemia")] public bool HasHyperlipidemiaSnake { get; set; }
+            [DataMember(Name = "hasHeartDisease")] public bool HasHeartDisease { get; set; }
+            [DataMember(Name = "has_heart_disease")] public bool HasHeartDiseaseSnake { get; set; }
+            [DataMember(Name = "hasKidneyDisease")] public bool HasKidneyDisease { get; set; }
+            [DataMember(Name = "has_kidney_disease")] public bool HasKidneyDiseaseSnake { get; set; }
+            [DataMember(Name = "hasLiverDisease")] public bool HasLiverDisease { get; set; }
+            [DataMember(Name = "has_liver_disease")] public bool HasLiverDiseaseSnake { get; set; }
+            [DataMember(Name = "hasThyroidDisease")] public bool HasThyroidDisease { get; set; }
+            [DataMember(Name = "has_thyroid_disease")] public bool HasThyroidDiseaseSnake { get; set; }
+            [DataMember(Name = "otherConditions")] public string OtherConditions { get; set; }
+            [DataMember(Name = "other_conditions")] public string OtherConditionsSnake { get; set; }
+            [DataMember(Name = "drugAllergies")] public string DrugAllergies { get; set; }
+            [DataMember(Name = "drug_allergies")] public string DrugAllergiesSnake { get; set; }
+            [DataMember(Name = "foodAllergies")] public string FoodAllergies { get; set; }
+            [DataMember(Name = "food_allergies")] public string FoodAllergiesSnake { get; set; }
+            [DataMember(Name = "currentMedications")] public string CurrentMedications { get; set; }
+            [DataMember(Name = "current_medications")] public string CurrentMedicationsSnake { get; set; }
+            [DataMember(Name = "medicalHistory")] public string MedicalHistory { get; set; }
+            [DataMember(Name = "medical_history")] public string MedicalHistorySnake { get; set; }
+            [DataMember(Name = "isSmoker")] public bool IsSmoker { get; set; }
+            [DataMember(Name = "is_smoker")] public bool IsSmokerSnake { get; set; }
+            [DataMember(Name = "drinksAlcohol")] public bool DrinksAlcohol { get; set; }
+            [DataMember(Name = "drinks_alcohol")] public bool DrinksAlcoholSnake { get; set; }
+            [DataMember(Name = "isPregnant")] public bool IsPregnant { get; set; }
+            [DataMember(Name = "is_pregnant")] public bool IsPregnantSnake { get; set; }
+            [DataMember(Name = "isBreastfeeding")] public bool IsBreastfeeding { get; set; }
+            [DataMember(Name = "is_breastfeeding")] public bool IsBreastfeedingSnake { get; set; }
         }
 
         [DataContract] private sealed class MemberApiResponseDto
@@ -509,10 +599,11 @@ namespace SCCRMonPOS
                 Email         = m.Email,
                 MemberCode    = m.MemberCode ?? m.MemberCodeCC,
                 CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
-                Sex           = m.Sex,
-                Dob           = m.Dob,
-                Remark        = m.Remark,
-                ThaiId        = m.ThaiId
+                Sex = m.Sex,
+                Dob = m.Dob,
+                Remark = m.Remark,
+                ThaiId = m.ThaiId,
+                PharmacyMedRecord = MapPharmacyMedRecordDto(m.PharmacyMedRecord)
             };
         }
 
@@ -563,6 +654,114 @@ namespace SCCRMonPOS
             };
         }
 
+        private static PharmacyMedRecord MapPharmacyMedRecordDto(PharmacyMedRecordDto dto)
+        {
+            if (dto == null) return null;
+
+            return new PharmacyMedRecord
+            {
+                MemberId = dto.MemberId ?? dto.MemberIdSnake,
+                PidDocumentType = dto.PidDocumentType ?? dto.PidDocumentTypeSnake,
+                PidDocumentNumberRaw = dto.PidDocumentNumberRaw ?? dto.PidDocumentNumberRawSnake,
+                PidDocumentNumberNormalized = dto.PidDocumentNumberNormalized ?? dto.PidDocumentNumberNormalizedSnake,
+                WeightKg = FormatNullableDecimal(dto.WeightKg ?? dto.WeightKgSnake),
+                HeightCm = FormatNullableDecimal(dto.HeightCm ?? dto.HeightCmSnake),
+                BpSystolic = FormatNullableInt(dto.BpSystolic ?? dto.BpSystolicSnake),
+                BpDiastolic = FormatNullableInt(dto.BpDiastolic ?? dto.BpDiastolicSnake),
+                BloodType = dto.BloodType ?? dto.BloodTypeSnake,
+                BloodRh = dto.BloodRh ?? dto.BloodRhSnake,
+                HasDiabetes = dto.HasDiabetes || dto.HasDiabetesSnake,
+                HasHypertension = dto.HasHypertension || dto.HasHypertensionSnake,
+                HasHyperlipidemia = dto.HasHyperlipidemia || dto.HasHyperlipidemiaSnake,
+                HasHeartDisease = dto.HasHeartDisease || dto.HasHeartDiseaseSnake,
+                HasKidneyDisease = dto.HasKidneyDisease || dto.HasKidneyDiseaseSnake,
+                HasLiverDisease = dto.HasLiverDisease || dto.HasLiverDiseaseSnake,
+                HasThyroidDisease = dto.HasThyroidDisease || dto.HasThyroidDiseaseSnake,
+                OtherConditions = dto.OtherConditions ?? dto.OtherConditionsSnake,
+                DrugAllergies = dto.DrugAllergies ?? dto.DrugAllergiesSnake,
+                FoodAllergies = dto.FoodAllergies ?? dto.FoodAllergiesSnake,
+                CurrentMedications = dto.CurrentMedications ?? dto.CurrentMedicationsSnake,
+                MedicalHistory = dto.MedicalHistory ?? dto.MedicalHistorySnake,
+                IsSmoker = dto.IsSmoker || dto.IsSmokerSnake,
+                DrinksAlcohol = dto.DrinksAlcohol || dto.DrinksAlcoholSnake,
+                IsPregnant = dto.IsPregnant || dto.IsPregnantSnake,
+                IsBreastfeeding = dto.IsBreastfeeding || dto.IsBreastfeedingSnake
+            };
+        }
+
+        private static string BuildCreateOrUpdateMemberJson(CreateMemberRequest request)
+        {
+            var sb = new StringBuilder(1024);
+            sb.Append('{');
+            sb.Append("\"name\":").Append(JsonStr(request.Name)).Append(',');
+            sb.Append("\"phone\":").Append(JsonStr(request.Phone)).Append(',');
+            sb.Append("\"email\":").Append(JsonStr(request.Email)).Append(',');
+            sb.Append("\"sex\":").Append(JsonStr(request.Sex)).Append(',');
+            sb.Append("\"dob\":").Append(JsonStr(request.Dob)).Append(',');
+            sb.Append("\"remark\":").Append(JsonStr(request.Remark));
+
+            if (request.PharmacyMedRecord != null)
+            {
+                sb.Append(",\"pharmacy_med_record\":");
+                AppendPharmacyMedRecordJson(sb, request.PharmacyMedRecord);
+            }
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static void AppendPharmacyMedRecordJson(StringBuilder sb, PharmacyMedRecord record)
+        {
+            sb.Append('{');
+            sb.Append("\"pidDocumentType\":").Append(JsonStr(record.PidDocumentType)).Append(',');
+            sb.Append("\"pidDocumentNumberRaw\":").Append(JsonStr(record.PidDocumentNumberRaw)).Append(',');
+            sb.Append("\"pidDocumentNumberNormalized\":").Append(JsonStr(record.PidDocumentNumberNormalized)).Append(',');
+            sb.Append("\"weightKg\":").Append(JsonStr(record.WeightKg)).Append(',');
+            sb.Append("\"heightCm\":").Append(JsonStr(record.HeightCm)).Append(',');
+            sb.Append("\"bpSystolic\":").Append(JsonStr(record.BpSystolic)).Append(',');
+            sb.Append("\"bpDiastolic\":").Append(JsonStr(record.BpDiastolic)).Append(',');
+            sb.Append("\"bloodType\":").Append(JsonStr(record.BloodType)).Append(',');
+            sb.Append("\"bloodRh\":").Append(JsonStr(record.BloodRh)).Append(',');
+            sb.Append("\"hasDiabetes\":").Append(JsonBool(record.HasDiabetes)).Append(',');
+            sb.Append("\"hasHypertension\":").Append(JsonBool(record.HasHypertension)).Append(',');
+            sb.Append("\"hasHyperlipidemia\":").Append(JsonBool(record.HasHyperlipidemia)).Append(',');
+            sb.Append("\"hasHeartDisease\":").Append(JsonBool(record.HasHeartDisease)).Append(',');
+            sb.Append("\"hasKidneyDisease\":").Append(JsonBool(record.HasKidneyDisease)).Append(',');
+            sb.Append("\"hasLiverDisease\":").Append(JsonBool(record.HasLiverDisease)).Append(',');
+            sb.Append("\"hasThyroidDisease\":").Append(JsonBool(record.HasThyroidDisease)).Append(',');
+            sb.Append("\"otherConditions\":").Append(JsonStr(record.OtherConditions)).Append(',');
+            sb.Append("\"drugAllergies\":").Append(JsonStr(record.DrugAllergies)).Append(',');
+            sb.Append("\"foodAllergies\":").Append(JsonStr(record.FoodAllergies)).Append(',');
+            sb.Append("\"currentMedications\":").Append(JsonStr(record.CurrentMedications)).Append(',');
+            sb.Append("\"medicalHistory\":").Append(JsonStr(record.MedicalHistory)).Append(',');
+            sb.Append("\"isSmoker\":").Append(JsonBool(record.IsSmoker)).Append(',');
+            sb.Append("\"drinksAlcohol\":").Append(JsonBool(record.DrinksAlcohol)).Append(',');
+            sb.Append("\"isPregnant\":").Append(JsonBool(record.IsPregnant)).Append(',');
+            sb.Append("\"isBreastfeeding\":").Append(JsonBool(record.IsBreastfeeding));
+            sb.Append('}');
+        }
+
+        private static string FormatNullableDecimal(decimal? value)
+        {
+            return value.HasValue
+                ? value.Value.ToString("0.##", CultureInfo.InvariantCulture)
+                : null;
+        }
+
+        private static string FormatNullableInt(int? value)
+        {
+            return value.HasValue
+                ? value.Value.ToString(CultureInfo.InvariantCulture)
+                : null;
+        }
+
+        private static string NormalizeDocRef(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? ""
+                : value.Trim().ToUpperInvariant();
+        }
+
         private static MemberSearchResult[] ParseMemberSearchResults(string json)
         {
             if (string.IsNullOrEmpty(json)) return new MemberSearchResult[0];
@@ -607,6 +806,23 @@ namespace SCCRMonPOS
             };
         }
 
+        private static RefundRegistrationResult ParseRefundRegistrationResult(string json)
+        {
+            var dto = Deserialize<RefundRegistrationResponseDto>(json);
+            if (dto == null) throw new ApiException("เซิร์ฟเวอร์ไม่ส่งผลลัพธ์การคืนสินค้า");
+
+            var first = dto.Results != null && dto.Results.Length > 0 ? dto.Results[0] : null;
+            return new RefundRegistrationResult
+            {
+                Ok = dto.Ok,
+                RefundDocNo = first != null ? first.RefundDocNo : "",
+                OriginalDocNo = first != null ? first.OriginalDocNo : "",
+                ReversalStatus = first != null && first.Reversal != null ? first.Reversal.Status : "",
+                PointsReversed = first != null && first.Reversal != null ? first.Reversal.PointsReversed : 0,
+                Reason = first != null && first.Reversal != null ? first.Reversal.Reason : null,
+            };
+        }
+
         private static string BuildLoyaltyClaimJson(LoyaltyClaimRequest r)
         {
             var sb = new StringBuilder(2048);
@@ -631,6 +847,37 @@ namespace SCCRMonPOS
                     sb.Append("\"qty\":").Append(JsonNum(item.Qty)).Append(',');
                     sb.Append("\"unitPrice\":").Append(JsonNum(item.UnitPrice)).Append(',');
                     sb.Append("\"lineTotal\":").Append(JsonNum(item.LineTotal));
+                    sb.Append('}');
+                }
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        private static string BuildRefundEventJson(PosReceipt receipt)
+        {
+            var sb = new StringBuilder(2048);
+            sb.Append('{');
+            sb.Append("\"branch_code\":").Append(JsonStr(NormalizeDocRef(receipt.BranchCode))).Append(',');
+            sb.Append("\"pos_code\":").Append(JsonStr(receipt.PosCode)).Append(',');
+            sb.Append("\"refund_doc_no\":").Append(JsonStr(NormalizeDocRef(receipt.DocNo))).Append(',');
+            sb.Append("\"original_doc_no\":").Append(JsonStr(NormalizeDocRef(receipt.OriginalDocNo))).Append(',');
+            sb.Append("\"doc_date\":").Append(JsonStr(receipt.DocDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))).Append(',');
+            sb.Append("\"doc_time\":").Append(JsonStr(receipt.DocTime)).Append(',');
+            sb.Append("\"cashier_code\":").Append(JsonStr(receipt.CashierCode)).Append(',');
+            sb.Append("\"refund_total\":").Append(JsonNum(receipt.GrandTotal)).Append(',');
+            sb.Append("\"line_rows\":[");
+            if (receipt.Items != null)
+            {
+                for (int i = 0; i < receipt.Items.Count; i++)
+                {
+                    var item = receipt.Items[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append('{');
+                    sb.Append("\"line_no\":").Append(i + 1).Append(',');
+                    sb.Append("\"product_code\":").Append(JsonStr(item.ProductCode)).Append(',');
+                    sb.Append("\"qty\":").Append(JsonNum(item.Qty)).Append(',');
+                    sb.Append("\"net_amount\":").Append(JsonNum(item.NetAmount));
                     sb.Append('}');
                 }
             }
@@ -971,6 +1218,11 @@ namespace SCCRMonPOS
             }
             sb.Append('"');
             return sb.ToString();
+        }
+
+        private static string JsonBool(bool value)
+        {
+            return value ? "true" : "false";
         }
 
         // ── JWT expiry detection ────────────────────────────────────────────────
