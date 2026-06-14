@@ -362,7 +362,7 @@ namespace SCCRMonPOS
                 return;
             }
 
-            string required = System.Configuration.ConfigurationManager.AppSettings["StaffEditPin"] ?? "123123";
+            string required = AppSettingsProvider.Get("StaffEditPin", "123123");
             if (!PromptPin("ใส่รหัสผ่านเพื่อแก้ไขข้อมูล", required))
                 return;
 

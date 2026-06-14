@@ -47,16 +47,15 @@ namespace SCCRMonPOS
         {
             Directory.CreateDirectory(_dataFolder);
 
-            string baseUrl = ConfigurationManager.AppSettings["ApiBaseUrl"]
-                          ?? "https://sc-official-website.onrender.com";
+            string baseUrl = AppSettingsProvider.Get("ApiBaseUrl", "https://sc-official-website.onrender.com");
 
             _api                      = new ApiClient(baseUrl);
-            _api.SetPosApiKey(ConfigurationManager.AppSettings["PosApiKey"] ?? "");
+            _api.SetPosApiKey(AppSettingsProvider.Get("PosApiKey", ""));
             _auth                     = new StaffAuthManager(_dataFolder);
             _watermarkStore           = new ReceiptWatermarkStore(_dataFolder);
             _watcherDiagnosticsEnabled = ReadBool("WatcherDiagnosticsEnabled", true);
             _bahtPerPoint             = ReadInt("BahtPerPoint", 10);
-            _internalApiToken         = ConfigurationManager.AppSettings["SccrmInternalApiToken"] ?? "";
+            _internalApiToken         = AppSettingsProvider.Get("SccrmInternalApiToken", "");
             _runtimeLogPath           = Path.Combine(_dataFolder, "runtime.log");
             _initialWatcherWatermark  = LoadOrCreateWatcherWatermark();
 
@@ -377,21 +376,17 @@ namespace SCCRMonPOS
 
         private static bool ReadBool(string key, bool defaultValue)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            bool parsed;
-            return bool.TryParse(raw, out parsed) ? parsed : defaultValue;
+            return AppSettingsProvider.GetBool(key, defaultValue);
         }
 
         private static int ReadInt(string key, int defaultValue)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            int parsed;
-            return int.TryParse(raw, out parsed) ? parsed : defaultValue;
+            return AppSettingsProvider.GetInt(key, defaultValue);
         }
 
         private static int ReadHex(string key, int defaultValue)
         {
-            string raw = ConfigurationManager.AppSettings[key];
+            string raw = AppSettingsProvider.Get(key, null);
             if (string.IsNullOrWhiteSpace(raw)) return defaultValue;
             raw = raw.Trim();
             if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))

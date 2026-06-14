@@ -805,20 +805,17 @@ namespace SCCRMonPOS
 
         private static string Cfg(string key, string def)
         {
-            string v = ConfigurationManager.AppSettings[key];
-            return v ?? def;
+            return AppSettingsProvider.Get(key, def);
         }
 
         private static bool ReadBool(string key, bool def)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            bool v; return bool.TryParse(raw, out v) ? v : def;
+            return AppSettingsProvider.GetBool(key, def);
         }
 
         private static int ReadInt(string key, int def)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            return int.TryParse(raw, out int v) ? v : def;
+            return AppSettingsProvider.GetInt(key, def);
         }
 
         private sealed class LocalSqlInstance

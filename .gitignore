@@ -10,3 +10,9 @@ obj/
 
 # Runtime data folder (contains encrypted token, logs, queue)
 SCCRMonPOS/data/
+SCCRMonPOS/SCCRMonPOS.secrets.config
+
+# Generated local config artifacts may contain live secrets
+build-verify/
+Backup_*/
+*.exe.config

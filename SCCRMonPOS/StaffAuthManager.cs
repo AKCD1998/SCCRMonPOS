@@ -34,7 +34,7 @@ namespace SCCRMonPOS
         {
             get
             {
-                string name = ConfigurationManager.AppSettings["StaffDeviceName"];
+                string name = AppSettingsProvider.Get("StaffDeviceName", null);
                 return string.IsNullOrWhiteSpace(name) ? Environment.MachineName : name;
             }
         }

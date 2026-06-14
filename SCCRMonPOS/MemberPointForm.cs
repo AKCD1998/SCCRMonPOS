@@ -801,8 +801,7 @@ namespace SCCRMonPOS
 
         private static decimal ReadDecimal(string key, decimal defaultValue)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            return decimal.TryParse(raw, out decimal v) ? v : defaultValue;
+            return AppSettingsProvider.GetDecimal(key, defaultValue);
         }
 
         // codeOverride: when called from PreScreenProductsAsync, pass the barcode/product code

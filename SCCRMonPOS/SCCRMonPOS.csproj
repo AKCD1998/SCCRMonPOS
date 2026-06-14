@@ -51,6 +51,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AdaPosWatcher.cs" />
+    <Compile Include="AppSettingsProvider.cs" />
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlobalHotKeyManager.cs" />
     <Compile Include="MemberClaimForm.cs">

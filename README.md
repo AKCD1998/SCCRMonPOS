@@ -4,6 +4,17 @@ POS companion agent for FRONT2. Bridges AdaPos HyperMart 4.6006.30 to the SCCRM 
 
 ---
 
+## Local Secret Setup
+
+Tracked `SCCRMonPOS/App.config` is now intentionally sanitized. Put live secrets in one of these instead:
+
+- `SCCRMonPOS/SCCRMonPOS.secrets.config` next to the project or copied beside the built `.exe`
+- environment variables named `SCCRMONPOS__PosApiKey`, `SCCRMONPOS__SccrmInternalApiToken`, `SCCRMONPOS__StaffEditPin`, `SCCRMONPOS__AdaPosDbUser`, `SCCRMONPOS__AdaPosDbPassword`
+
+Start from `SCCRMonPOS/SCCRMonPOS.secrets.config.example`. The secrets file is gitignored.
+
+---
+
 ## Known Pain Points — Current Local POS Infrastructure
 
 Documented during forensic inspection of AdaPos HyperMart 4.6006.30 on POSSRV (2026-05-18).

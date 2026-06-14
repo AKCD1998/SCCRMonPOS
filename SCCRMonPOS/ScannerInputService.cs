@@ -274,8 +274,7 @@ namespace SCCRMonPOS
 
         private static int ReadInt(string key, int defaultValue)
         {
-            string raw = ConfigurationManager.AppSettings[key];
-            return int.TryParse(raw, out int v) ? v : defaultValue;
+            return AppSettingsProvider.GetInt(key, defaultValue);
         }
     }
 }
