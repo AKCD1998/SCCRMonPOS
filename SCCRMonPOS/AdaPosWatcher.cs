@@ -63,6 +63,12 @@ namespace SCCRMonPOS
             new Dictionary<string, PosReceipt>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _pendingCapturedAt =
             new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        // Return bills detected before AdaPos wrote the original-bill ref (FTShdPosCN).
+        // Held and re-checked every poll until the ref appears or the bill times out.
+        private readonly Dictionary<string, PosReceipt> _pendingReturns =
+            new Dictionary<string, PosReceipt>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _pendingReturnCapturedAt =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan PendingReceiptTimeout = TimeSpan.FromMinutes(10);
 
         // ─────────────────────────────────────────────────────────────────────
@@ -263,6 +269,9 @@ namespace SCCRMonPOS
                 // Re-check receipts that were incomplete (GrandTotal=0 or no items) on a previous poll.
                 CheckPendingReceipts(conn);
 
+                // Re-check return bills that were missing their original-bill ref on a previous poll.
+                CheckPendingReturns(conn);
+
                 List<PosReceipt> receipts = FetchNewReceipts(conn);
                 RaisePollDiagnostic(receipts);
 
@@ -270,7 +279,20 @@ namespace SCCRMonPOS
                 {
                     if (receipt.IsReturn)
                     {
-                        ReturnDetected?.Invoke(this, receipt);
+                        if (!string.IsNullOrWhiteSpace(receipt.OriginalDocNo))
+                        {
+                            // Original-bill ref already present — fire immediately.
+                            ReturnDetected?.Invoke(this, receipt);
+                        }
+                        else
+                        {
+                            // AdaPos writes the return header ~3 s before it fills FTShdPosCN.
+                            // Hold and re-check until the ref appears, instead of dropping the reversal.
+                            if (!_pendingReturnCapturedAt.ContainsKey(receipt.DocNo))
+                                _pendingReturnCapturedAt[receipt.DocNo] = DateTime.Now;
+                            _pendingReturns[receipt.DocNo] = receipt;
+                            RaiseDiagnostic("Return pending original-bill ref: " + receipt.DocNo);
+                        }
                         continue;
                     }
 
@@ -336,6 +358,51 @@ namespace SCCRMonPOS
                 catch (Exception ex)
                 {
                     RaiseDiagnostic("Pending receipt re-check failed for " + docNo + ": " + ex.Message);
+                }
+            }
+        }
+
+        private void CheckPendingReturns(SqlConnection conn)
+        {
+            if (_pendingReturns.Count == 0) return;
+
+            DateTime now = DateTime.Now;
+            foreach (string docNo in new List<string>(_pendingReturns.Keys))
+            {
+                PosReceipt receipt = _pendingReturns[docNo];
+
+                DateTime capturedAt;
+                bool timedOut = _pendingReturnCapturedAt.TryGetValue(docNo, out capturedAt) &&
+                                now - capturedAt > PendingReceiptTimeout;
+
+                if (!timedOut)
+                {
+                    try
+                    {
+                        RefreshReturnHeader(conn, receipt);
+                    }
+                    catch (Exception ex)
+                    {
+                        RaiseDiagnostic("Pending return re-check failed for " + docNo + ": " + ex.Message);
+                        continue; // leave it pending; retry on the next poll until it times out
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(receipt.OriginalDocNo))
+                {
+                    _pendingReturns.Remove(docNo);
+                    _pendingReturnCapturedAt.Remove(docNo);
+                    RaiseDiagnostic("Pending return resolved: " + docNo + " -> original=" + receipt.OriginalDocNo);
+                    ReturnDetected?.Invoke(this, receipt);
+                }
+                else if (timedOut)
+                {
+                    // Original ref never arrived. Fire anyway so the watermark advances (stops re-fetching)
+                    // and TrayAppContext logs the skip; reversal will no-op without an original bill.
+                    _pendingReturns.Remove(docNo);
+                    _pendingReturnCapturedAt.Remove(docNo);
+                    RaiseDiagnostic("Pending return timed out without original-bill ref: " + docNo);
+                    ReturnDetected?.Invoke(this, receipt);
                 }
             }
         }
@@ -697,6 +764,29 @@ namespace SCCRMonPOS
                         receipt.Discount    = Dec(r, "FCShdDis");
                         receipt.CashAmount  = Dec(r, "FCShdMnyCsh");
                         receipt.ChangeGiven = Dec(r, "FCShdChn");
+                    }
+                }
+            }
+        }
+
+        // ── SQL: refresh original-bill ref for a pending return ───────────────
+
+        private static void RefreshReturnHeader(SqlConnection conn, PosReceipt receipt)
+        {
+            string sql = @"
+                SELECT FCShdGrand, FTShdPosCN
+                FROM   " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @"
+                WHERE  FTShdDocNo = @docNo";
+
+            using (var cmd = new SqlCommand(sql, conn))
+            {
+                cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (r.Read())
+                    {
+                        receipt.GrandTotal    = Dec(r, "FCShdGrand");
+                        receipt.OriginalDocNo = Str(r, "FTShdPosCN");
                     }
                 }
             }
