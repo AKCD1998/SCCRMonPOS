@@ -64,7 +64,7 @@ namespace SCCRMonPOS
             _dgvResults.CellDoubleClick  += OnGridDoubleClick;
             _dgvResults.KeyDown          += OnGridKeyDown;
             _dgvResults.SelectionChanged += OnGridSelectionChanged;
-            _btnTabHistory.Click += OnComingSoonClick;
+            _btnTabHistory.Click += OnHistoryClick;
             _btnTabMembers.Click += OnComingSoonClick;
             _btnTabReports.Click += OnComingSoonClick;
             _btnTabExtra.Click   += OnExtraMenuClick;
@@ -121,6 +121,24 @@ namespace SCCRMonPOS
                 "SCCRM",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        private void OnHistoryClick(object sender, EventArgs e)
+        {
+            if (_selectedMember == null || string.IsNullOrWhiteSpace(_selectedMember.Id))
+            {
+                MessageBox.Show(
+                    "กรุณาค้นหาและเลือกสมาชิกก่อน จึงจะดูประวัติการซื้อได้",
+                    "SCCRM",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var form = new PurchaseHistoryForm(_api, _selectedMember.Id, _selectedMember.DisplayName))
+            {
+                form.ShowDialog(this);
+            }
         }
 
         private void LoadReceipt(PosReceipt receipt)

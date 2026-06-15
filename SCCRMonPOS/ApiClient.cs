@@ -96,6 +96,40 @@ namespace SCCRMonPOS
         public string Reason { get; set; }
     }
 
+    public class PurchaseHistoryResult
+    {
+        public PurchaseRecord[] Purchases { get; set; }
+    }
+
+    public class PurchaseRecord
+    {
+        public string  ReceiptNo     { get; set; }
+        public string  BranchCode    { get; set; }
+        public string  SoldAt        { get; set; }
+        public decimal TotalAmount   { get; set; }
+        public int     AwardedPoints { get; set; }
+        public PurchaseItem[]   Items   { get; set; }
+        public PurchaseReturn[] Returns { get; set; }
+    }
+
+    public class PurchaseItem
+    {
+        public string  ProductCode { get; set; }
+        public string  ProductName { get; set; }
+        public decimal Qty         { get; set; }
+        public decimal UnitPrice   { get; set; }
+        public decimal LineTotal   { get; set; }
+    }
+
+    public class PurchaseReturn
+    {
+        public string  RefundDocNo    { get; set; }
+        public string  RefundedAt     { get; set; }
+        public decimal RefundTotal    { get; set; }
+        public decimal ReturnedQty    { get; set; }
+        public int     PointsReversed { get; set; }
+    }
+
     public class CreateMemberRequest
     {
         public string Name { get; set; }
@@ -326,6 +360,15 @@ namespace SCCRMonPOS
             return ParseMemberFromApiResponse(json);
         }
 
+        public async Task<PurchaseHistoryResult> GetMemberPurchaseHistoryAsync(string memberId)
+        {
+            RequireValidToken();
+            if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
+            string json = await GetJsonWithPosKeyAsync(
+                "/api/members/" + Uri.EscapeDataString(memberId) + "/purchase-history");
+            return ParsePurchaseHistory(json);
+        }
+
         public async Task<MemberSearchResult> UpdateMemberAsync(string memberId, CreateMemberRequest request)
         {
             RequireValidToken();
@@ -458,6 +501,90 @@ namespace SCCRMonPOS
             [DataMember(Name = "status")] public string Status { get; set; }
             [DataMember(Name = "pointsReversed")] public int PointsReversed { get; set; }
             [DataMember(Name = "reason")] public string Reason { get; set; }
+        }
+
+        [DataContract] private sealed class PurchaseHistoryDto
+        {
+            [DataMember(Name = "ok")]        public bool   Ok        { get; set; }
+            [DataMember(Name = "purchases")] public PurchaseRecordDto[] Purchases { get; set; }
+        }
+
+        [DataContract] private sealed class PurchaseRecordDto
+        {
+            [DataMember(Name = "receiptNo")]     public string  ReceiptNo     { get; set; }
+            [DataMember(Name = "branchCode")]    public string  BranchCode    { get; set; }
+            [DataMember(Name = "soldAt")]        public string  SoldAt        { get; set; }
+            [DataMember(Name = "totalAmount")]   public decimal TotalAmount   { get; set; }
+            [DataMember(Name = "awardedPoints")] public int     AwardedPoints { get; set; }
+            [DataMember(Name = "items")]         public PurchaseItemDto[]   Items   { get; set; }
+            [DataMember(Name = "returns")]       public PurchaseReturnDto[] Returns { get; set; }
+        }
+
+        [DataContract] private sealed class PurchaseItemDto
+        {
+            [DataMember(Name = "productCode")] public string  ProductCode { get; set; }
+            [DataMember(Name = "productName")] public string  ProductName { get; set; }
+            [DataMember(Name = "qty")]         public decimal Qty         { get; set; }
+            [DataMember(Name = "unitPrice")]   public decimal UnitPrice   { get; set; }
+            [DataMember(Name = "lineTotal")]   public decimal LineTotal   { get; set; }
+        }
+
+        [DataContract] private sealed class PurchaseReturnDto
+        {
+            [DataMember(Name = "refundDocNo")]    public string  RefundDocNo    { get; set; }
+            [DataMember(Name = "refundedAt")]     public string  RefundedAt     { get; set; }
+            [DataMember(Name = "refundTotal")]    public decimal RefundTotal    { get; set; }
+            [DataMember(Name = "returnedQty")]    public decimal ReturnedQty    { get; set; }
+            [DataMember(Name = "pointsReversed")] public int     PointsReversed { get; set; }
+        }
+
+        private static PurchaseHistoryResult ParsePurchaseHistory(string json)
+        {
+            var dto = Deserialize<PurchaseHistoryDto>(json);
+            if (dto == null) throw new ApiException("เซิร์ฟเวอร์ไม่ส่งประวัติการซื้อกลับมา");
+
+            var records = dto.Purchases ?? new PurchaseRecordDto[0];
+            var result = new PurchaseRecord[records.Length];
+            for (int i = 0; i < records.Length; i++)
+            {
+                var p = records[i];
+                var items = p.Items ?? new PurchaseItemDto[0];
+                var rets  = p.Returns ?? new PurchaseReturnDto[0];
+
+                var mappedItems = new PurchaseItem[items.Length];
+                for (int j = 0; j < items.Length; j++)
+                    mappedItems[j] = new PurchaseItem
+                    {
+                        ProductCode = items[j].ProductCode,
+                        ProductName = items[j].ProductName,
+                        Qty         = items[j].Qty,
+                        UnitPrice   = items[j].UnitPrice,
+                        LineTotal   = items[j].LineTotal
+                    };
+
+                var mappedReturns = new PurchaseReturn[rets.Length];
+                for (int j = 0; j < rets.Length; j++)
+                    mappedReturns[j] = new PurchaseReturn
+                    {
+                        RefundDocNo    = rets[j].RefundDocNo,
+                        RefundedAt     = rets[j].RefundedAt,
+                        RefundTotal    = rets[j].RefundTotal,
+                        ReturnedQty    = rets[j].ReturnedQty,
+                        PointsReversed = rets[j].PointsReversed
+                    };
+
+                result[i] = new PurchaseRecord
+                {
+                    ReceiptNo     = p.ReceiptNo,
+                    BranchCode    = p.BranchCode,
+                    SoldAt        = p.SoldAt,
+                    TotalAmount   = p.TotalAmount,
+                    AwardedPoints = p.AwardedPoints,
+                    Items         = mappedItems,
+                    Returns       = mappedReturns
+                };
+            }
+            return new PurchaseHistoryResult { Purchases = result };
         }
 
         [DataContract] private sealed class MemberDetailDto
