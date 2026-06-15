@@ -125,17 +125,12 @@ namespace SCCRMonPOS
 
         private void OnHistoryClick(object sender, EventArgs e)
         {
-            if (_selectedMember == null || string.IsNullOrWhiteSpace(_selectedMember.Id))
-            {
-                MessageBox.Show(
-                    "กรุณาค้นหาและเลือกสมาชิกก่อน จึงจะดูประวัติการซื้อได้",
-                    "SCCRM",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
+            // Opens directly; if a member is already selected we pre-load their history,
+            // otherwise the form's own search box is used to find one.
+            string memberId   = _selectedMember != null ? _selectedMember.Id : null;
+            string memberName = _selectedMember != null ? _selectedMember.DisplayName : null;
 
-            using (var form = new PurchaseHistoryForm(_api, _selectedMember.Id, _selectedMember.DisplayName))
+            using (var form = new PurchaseHistoryForm(_api, memberId, memberName))
             {
                 form.ShowDialog(this);
             }
