@@ -1,0 +1,26 @@
+name: Desktop checks
+on:
+  push:
+    branches: [master]
+    paths: ['SCCRMonPOS/**', 'tools/**', '.github/workflows/desktop-ci.yml']
+  pull_request:
+    paths: ['SCCRMonPOS/**', 'tools/**', '.github/workflows/desktop-ci.yml']
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build and check desktop features
+        shell: pwsh
+        run: |
+          msbuild tools/DesktopFeatureCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/desktop-feature-check/DesktopFeatureCheck.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/MemberApiCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/member-api-check/MemberApiCheck.exe
+          exit $LASTEXITCODE

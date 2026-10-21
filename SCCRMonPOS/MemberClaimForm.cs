@@ -13,6 +13,22 @@ namespace SCCRMonPOS
         private readonly AdaPosWatcher _watcher;
         private readonly int _bahtPerPoint;
         private readonly string _staffCode;
+        private readonly CustomerDisplayController _customerDisplay;
+        private readonly bool _ownsCustomerDisplay;
+        private LinkLabel _updateNotice;
+
+        public void ShowUpdateNotice(string version, Action openUpdates)
+        {
+            if (_updateNotice != null) { Controls.Remove(_updateNotice); _updateNotice.Dispose(); _updateNotice = null; }
+            if (string.IsNullOrWhiteSpace(version)) return;
+            _updateNotice = new LinkLabel {
+                Text = "มีอัปเดต " + version + " — กดดูรายละเอียดเมื่อสะดวก",
+                Bounds = new Rectangle(16, ClientSize.Height - 30, ClientSize.Width - 32, 22),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+            };
+            _updateNotice.LinkClicked += (s, e) => { Close(); openUpdates(); };
+            Controls.Add(_updateNotice);
+        }
 
         private PosReceipt _receipt;
         private MemberSearchResult _selectedMember;
@@ -26,17 +42,21 @@ namespace SCCRMonPOS
             AdaPosWatcher watcher,
             int bahtPerPoint,
             string staffCode,
-            PosReceipt prefilledReceipt = null)
+            PosReceipt prefilledReceipt = null,
+            CustomerDisplayController customerDisplay = null)
         {
             _api          = api;
             _watcher      = watcher;
             _bahtPerPoint = bahtPerPoint > 0 ? bahtPerPoint : 10;
             _staffCode    = staffCode ?? "";
+            _ownsCustomerDisplay = customerDisplay == null;
+            _customerDisplay = customerDisplay ?? new CustomerDisplayController(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
 
             InitializeComponent();
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
+            FormClosed += (s, e) => { if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
 
             if (prefilledReceipt != null)
                 LoadReceipt(prefilledReceipt);
@@ -258,16 +278,22 @@ namespace SCCRMonPOS
 
             foreach (MemberSearchResult m in results)
             {
-                _dgvResults.Rows.Add(
-                    m.Id,
-                    m.MemberCode ?? "",
-                    m.DisplayName ?? "-",
-                    m.Phone ?? "",
-                    m.CurrentPoints.ToString(CultureInfo.InvariantCulture));
+                AddMemberRow(m);
             }
 
             SetStatus("", false);
             RefreshEmptyStates();
+        }
+
+        private void AddMemberRow(MemberSearchResult member)
+        {
+            var row = new DataGridViewRow();
+            row.CreateCells(_dgvResults, member.Id, member.MemberCode ?? "", member.DisplayName ?? "-", member.Phone ?? "",
+                member.PointsAvailable ? member.CurrentPoints.ToString(CultureInfo.InvariantCulture) : "ยังไม่เปิดใช้");
+            // Automatic first-row selection fires synchronously during Add.
+            // Attach the capabilities before that event can select the member.
+            row.Tag = member;
+            _dgvResults.Rows.Add(row);
         }
 
         private void OnGridDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -299,7 +325,7 @@ namespace SCCRMonPOS
             DataGridViewRow row = _dgvResults.Rows[rowIndex];
             int points;
 
-            _selectedMember = new MemberSearchResult
+            _selectedMember = row.Tag as MemberSearchResult ?? new MemberSearchResult
             {
                 Id = row.Cells["Id"].Value != null ? row.Cells["Id"].Value.ToString() : "",
                 DisplayName = row.Cells["DisplayName"].Value != null ? row.Cells["DisplayName"].Value.ToString() : "",
@@ -332,6 +358,13 @@ namespace SCCRMonPOS
 
             int pts = _receipt != null ? CalcPoints(CalcEligibleTotal(_receipt)) : 0;
             _lblMemberName.Text = member.DisplayName + (string.IsNullOrWhiteSpace(member.Phone) ? "" : " | " + member.Phone);
+            if (!member.PointsAvailable)
+            {
+                _lblMemberPoints.Text = "ระบบแต้มยังไม่เปิดใช้ — สมัคร ค้นหา และแก้ไขสมาชิกได้";
+                _pnlMemberSummary.Visible = true;
+                _btnEditMember.Visible = true;
+                return;
+            }
             _lblMemberPoints.Text = "แต้มปัจจุบัน: " + member.CurrentPoints.ToString(CultureInfo.InvariantCulture) +
                                     (pts > 0 ? " -> " + (member.CurrentPoints + pts).ToString(CultureInfo.InvariantCulture) + " หลังสะสม" : "");
             _pnlMemberSummary.Visible = true;
@@ -346,16 +379,18 @@ namespace SCCRMonPOS
                 return;
             }
 
+            using (var choice = new RegistrationChoiceForm(_customerDisplay, this))
+            {
+                var result = choice.ShowDialog(this);
+                if (choice.DisplayedQr) { WindowState = FormWindowState.Minimized; return; }
+                if (result != DialogResult.OK) return;
+            }
+
             var form = new NewMemberForm(_api);
             form.MemberSaved += delegate (MemberSearchResult created)
             {
                 _dgvResults.Rows.Clear();
-                _dgvResults.Rows.Add(
-                    created.Id,
-                    created.MemberCode ?? "",
-                    created.DisplayName ?? "-",
-                    created.Phone ?? "",
-                    created.CurrentPoints.ToString(CultureInfo.InvariantCulture));
+                AddMemberRow(created);
                 SelectMemberAtRow(0);
                 _txtMemberSearch.Text = !string.IsNullOrWhiteSpace(created.Phone) ? created.Phone : (created.DisplayName ?? "");
                 SetStatus("เพิ่มสมาชิกใหม่สำเร็จ", false, Color.FromArgb(24, 140, 52));
@@ -428,7 +463,8 @@ namespace SCCRMonPOS
                         row.Cells["MemberCode"].Value = updated.MemberCode;
                         row.Cells["DisplayName"].Value = updated.DisplayName;
                         row.Cells["Phone"].Value = updated.Phone;
-                        row.Cells["Points"].Value = updated.CurrentPoints.ToString(CultureInfo.InvariantCulture);
+                        row.Cells["Points"].Value = updated.PointsAvailable ? updated.CurrentPoints.ToString(CultureInfo.InvariantCulture) : "ยังไม่เปิดใช้";
+                        row.Tag = updated;
                         break;
                     }
                 }
@@ -606,7 +642,7 @@ namespace SCCRMonPOS
 
         private bool CanConfirm()
         {
-            return _receipt != null && CalcEligibleTotal(_receipt) > 0m && _selectedMember != null;
+            return _receipt != null && CalcEligibleTotal(_receipt) > 0m && _selectedMember != null && _selectedMember.PointsAvailable;
         }
 
         private void RefreshEmptyStates()
@@ -636,6 +672,8 @@ namespace SCCRMonPOS
                 Email         = !string.IsNullOrWhiteSpace(detail?.Email) ? detail.Email : summary?.Email,
                 MemberCode    = !string.IsNullOrWhiteSpace(detail?.MemberCode) ? detail.MemberCode : summary?.MemberCode,
                 CurrentPoints = detail != null && detail.CurrentPoints > 0 ? detail.CurrentPoints : (summary != null ? summary.CurrentPoints : 0),
+                PointsAvailable = detail?.PointsAvailable ?? summary?.PointsAvailable ?? true,
+                PharmacyMedRecordAvailable = detail?.PharmacyMedRecordAvailable ?? summary?.PharmacyMedRecordAvailable ?? true,
                 Sex           = detail?.Sex,
                 Dob           = detail?.Dob,
                 Remark        = detail?.Remark,

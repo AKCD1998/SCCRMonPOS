@@ -2,6 +2,9 @@
 
 POS companion agent for FRONT2. Bridges AdaPos HyperMart 4.6006.30 to the SCCRM loyalty backend.
 
+Current desktop feature guide: [QR customer display and optional updates](docs/CUSTOMER_DISPLAY_AND_UPDATES.md).
+Basic Supabase member integration: [verified membership release](docs/POS_MEMBERS_SUPABASE_2026-10-21.md).
+
 ---
 
 ## Local Secret Setup
