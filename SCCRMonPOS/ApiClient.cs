@@ -59,6 +59,10 @@ namespace SCCRMonPOS
 
     public class LoyaltyClaimItem
     {
+        public int Seq { get; set; }
+        public string Barcode { get; set; }
+        public decimal? LineDiscount { get; set; }
+        public string PromotionCode { get; set; }
         public string  ProductCode { get; set; }
         public string  ProductName { get; set; }
         public decimal Qty         { get; set; }
@@ -68,6 +72,10 @@ namespace SCCRMonPOS
 
     public class LoyaltyClaimRequest
     {
+        public decimal? ReceiptTotalAmount { get; set; }
+        public decimal? ReceiptDiscount { get; set; }
+        public string PosCode { get; set; }
+        public string ReceiptCashierCode { get; set; }
         public string             ReceiptNo        { get; set; }
         public string             BranchCode       { get; set; }
         public string             CashierStaffCode { get; set; }
@@ -101,10 +109,18 @@ namespace SCCRMonPOS
     public class PurchaseHistoryResult
     {
         public PurchaseRecord[] Purchases { get; set; }
+        public bool HasMore { get; set; }
+        public string NextCursor { get; set; }
     }
 
     public class PurchaseRecord
     {
+        public string ClaimId { get; set; }
+        public decimal EligibleAmount { get; set; }
+        public string TotalAmountSource { get; set; }
+        public decimal? ReceiptDiscount { get; set; }
+        public string PosCode { get; set; }
+        public string ReceiptCashierCode { get; set; }
         public string  ReceiptNo     { get; set; }
         public string  BranchCode    { get; set; }
         public string  SoldAt        { get; set; }
@@ -116,6 +132,10 @@ namespace SCCRMonPOS
 
     public class PurchaseItem
     {
+        public int Seq { get; set; }
+        public string Barcode { get; set; }
+        public decimal? LineDiscount { get; set; }
+        public string PromotionCode { get; set; }
         public string  ProductCode { get; set; }
         public string  ProductName { get; set; }
         public decimal Qty         { get; set; }
@@ -366,10 +386,16 @@ namespace SCCRMonPOS
 
         public async Task<PurchaseHistoryResult> GetMemberPurchaseHistoryAsync(string memberId)
         {
+            return await GetMemberPurchaseHistoryPageAsync(memberId, null);
+        }
+
+        public async Task<PurchaseHistoryResult> GetMemberPurchaseHistoryPageAsync(string memberId, string cursor)
+        {
             RequireValidToken();
             if (string.IsNullOrWhiteSpace(memberId)) throw new ApiException("memberId is required.");
             string json = await GetJsonWithPosKeyAsync(
-                "/api/members/" + Uri.EscapeDataString(memberId) + "/purchase-history");
+                "/api/members/" + Uri.EscapeDataString(memberId) + "/purchase-history" +
+                (string.IsNullOrWhiteSpace(cursor) ? "" : "?cursor=" + Uri.EscapeDataString(cursor)));
             return ParsePurchaseHistory(json);
         }
 
@@ -504,12 +530,20 @@ namespace SCCRMonPOS
 
         [DataContract] private sealed class PurchaseHistoryDto
         {
+            [DataMember(Name = "hasMore")] public bool HasMore { get; set; }
+            [DataMember(Name = "nextCursor")] public string NextCursor { get; set; }
             [DataMember(Name = "ok")]        public bool   Ok        { get; set; }
             [DataMember(Name = "purchases")] public PurchaseRecordDto[] Purchases { get; set; }
         }
 
         [DataContract] private sealed class PurchaseRecordDto
         {
+            [DataMember(Name = "claimId")] public string ClaimId { get; set; }
+            [DataMember(Name = "eligibleAmount")] public decimal EligibleAmount { get; set; }
+            [DataMember(Name = "totalAmountSource")] public string TotalAmountSource { get; set; }
+            [DataMember(Name = "receiptDiscount")] public decimal? ReceiptDiscount { get; set; }
+            [DataMember(Name = "posCode")] public string PosCode { get; set; }
+            [DataMember(Name = "receiptCashierCode")] public string ReceiptCashierCode { get; set; }
             [DataMember(Name = "receiptNo")]     public string  ReceiptNo     { get; set; }
             [DataMember(Name = "branchCode")]    public string  BranchCode    { get; set; }
             [DataMember(Name = "soldAt")]        public string  SoldAt        { get; set; }
@@ -521,6 +555,10 @@ namespace SCCRMonPOS
 
         [DataContract] private sealed class PurchaseItemDto
         {
+            [DataMember(Name = "seq")] public int Seq { get; set; }
+            [DataMember(Name = "barcode")] public string Barcode { get; set; }
+            [DataMember(Name = "lineDiscount")] public decimal? LineDiscount { get; set; }
+            [DataMember(Name = "promotionCode")] public string PromotionCode { get; set; }
             [DataMember(Name = "productCode")] public string  ProductCode { get; set; }
             [DataMember(Name = "productName")] public string  ProductName { get; set; }
             [DataMember(Name = "qty")]         public decimal Qty         { get; set; }
@@ -554,6 +592,10 @@ namespace SCCRMonPOS
                 for (int j = 0; j < items.Length; j++)
                     mappedItems[j] = new PurchaseItem
                     {
+                        Seq = items[j].Seq,
+                        Barcode = items[j].Barcode,
+                        LineDiscount = items[j].LineDiscount,
+                        PromotionCode = items[j].PromotionCode,
                         ProductCode = items[j].ProductCode,
                         ProductName = items[j].ProductName,
                         Qty         = items[j].Qty,
@@ -574,6 +616,12 @@ namespace SCCRMonPOS
 
                 result[i] = new PurchaseRecord
                 {
+                    ClaimId = p.ClaimId,
+                    EligibleAmount = p.EligibleAmount,
+                    TotalAmountSource = p.TotalAmountSource,
+                    ReceiptDiscount = p.ReceiptDiscount,
+                    PosCode = p.PosCode,
+                    ReceiptCashierCode = p.ReceiptCashierCode,
                     ReceiptNo     = p.ReceiptNo,
                     BranchCode    = p.BranchCode,
                     SoldAt        = p.SoldAt,
@@ -583,7 +631,7 @@ namespace SCCRMonPOS
                     Returns       = mappedReturns
                 };
             }
-            return new PurchaseHistoryResult { Purchases = result };
+            return new PurchaseHistoryResult { Purchases = result, HasMore = dto.HasMore, NextCursor = dto.NextCursor };
         }
 
         [DataContract] private sealed class MemberDetailDto
@@ -972,6 +1020,12 @@ namespace SCCRMonPOS
             sb.Append("\"cashierStaffCode\":").Append(JsonStr(r.CashierStaffCode)).Append(',');
             sb.Append("\"soldAt\":").Append(JsonStr(r.SoldAt)).Append(',');
             sb.Append("\"totalAmount\":").Append(JsonNum(r.TotalAmount)).Append(',');
+            if (r.ReceiptTotalAmount.HasValue)
+                sb.Append("\"receiptTotalAmount\":").Append(JsonNum(r.ReceiptTotalAmount.Value)).Append(',');
+            if (r.ReceiptDiscount.HasValue)
+                sb.Append("\"receiptDiscount\":").Append(JsonNum(r.ReceiptDiscount.Value)).Append(',');
+            sb.Append("\"posCode\":").Append(JsonStr(r.PosCode)).Append(',');
+            sb.Append("\"receiptCashierCode\":").Append(JsonStr(r.ReceiptCashierCode)).Append(',');
             sb.Append("\"previewPoints\":").Append(r.PreviewPoints).Append(',');
             sb.Append("\"memberId\":").Append(JsonStr(r.MemberId)).Append(',');
             sb.Append("\"items\":[");
@@ -982,6 +1036,11 @@ namespace SCCRMonPOS
                     var item = r.Items[i];
                     if (i > 0) sb.Append(',');
                     sb.Append('{');
+                    sb.Append("\"seq\":").Append(item.Seq).Append(',');
+                    sb.Append("\"barcode\":").Append(JsonStr(item.Barcode)).Append(',');
+                    sb.Append("\"promotionCode\":").Append(JsonStr(item.PromotionCode)).Append(',');
+                    if (item.LineDiscount.HasValue)
+                        sb.Append("\"lineDiscount\":").Append(JsonNum(item.LineDiscount.Value)).Append(',');
                     sb.Append("\"productCode\":").Append(JsonStr(item.ProductCode)).Append(',');
                     sb.Append("\"productName\":").Append(JsonStr(item.ProductName)).Append(',');
                     sb.Append("\"qty\":").Append(JsonNum(item.Qty)).Append(',');
