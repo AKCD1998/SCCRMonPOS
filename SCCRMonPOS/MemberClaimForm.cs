@@ -16,6 +16,9 @@ namespace SCCRMonPOS
         private readonly CustomerDisplayController _customerDisplay;
         private readonly bool _ownsCustomerDisplay;
         private LinkLabel _updateNotice;
+        private int? _centralQuotePoints;
+        private bool _quoteLoading;
+        private Timer _promotionTimer;
 
         public void ShowUpdateNotice(string version, Action openUpdates)
         {
@@ -56,7 +59,10 @@ namespace SCCRMonPOS
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
-            FormClosed += (s, e) => { if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
+            FormClosed += (s, e) => { if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
+            _promotionTimer = new Timer { Interval = 30000 };
+            _promotionTimer.Tick += async (s, e) => await RefreshCentralQuoteAsync();
+            _promotionTimer.Start();
 
             if (prefilledReceipt != null)
                 LoadReceipt(prefilledReceipt);
@@ -108,7 +114,7 @@ namespace SCCRMonPOS
             _extraMenu = new ContextMenuStrip();
             AddComingSoonMenuItem("จัดการสินค้า");
             AddComingSoonMenuItem("จัดการหมวดสินค้า");
-            AddComingSoonMenuItem("จัดการโปรโมชั่น");
+            _extraMenu.Items.Add("โปรโมชั่นสะสมแต้มส่วนกลาง", null, (s, e) => CentralPromotions.OpenPortal(_receipt?.BranchCode));
             AddComingSoonMenuItem("ตั้งค่าระบบ");
             AddComingSoonMenuItem("สำรองข้อมูล");
             AddComingSoonMenuItem("นำเข้าข้อมูล");
@@ -159,10 +165,34 @@ namespace SCCRMonPOS
         private void LoadReceipt(PosReceipt receipt)
         {
             _receipt = receipt;
+            _centralQuotePoints = null;
             _txtReceiptNo.Text = receipt.DocNo ?? "";
             PopulateItemsList(receipt);
             ShowMemberSummary(_selectedMember);
             UpdateConfirmButton();
+            _ = RefreshCentralQuoteAsync();
+        }
+
+        private async Task RefreshCentralQuoteAsync()
+        {
+            if (_receipt == null || _quoteLoading || IsDisposed) return;
+            var receipt = _receipt;
+            _quoteLoading = true;
+            try
+            {
+                var quote = await CentralPromotions.QuoteAsync(CalcEligibleTotal(receipt), receipt.BranchCode);
+                if (IsDisposed || !ReferenceEquals(receipt, _receipt)) return;
+                _centralQuotePoints = quote.AwardedPoints;
+                _lblPreviewPoints.Text = "แต้มตามโปรส่วนกลาง: " + quote.AwardedPoints.ToString(CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                if (IsDisposed || !ReferenceEquals(receipt, _receipt)) return;
+                _centralQuotePoints = null;
+                _lblPreviewPoints.Text = "ตรวจสอบโปรไม่ได้ — คิดแต้มจริงเมื่อยืนยัน";
+            }
+            finally { _quoteLoading = false; }
+            if (!IsDisposed) ShowMemberSummary(_selectedMember);
         }
 
         private async Task LoadReceiptAsync()
@@ -224,10 +254,7 @@ namespace SCCRMonPOS
             _lblTotal.Text = grandTotal > 0
                 ? "ยอดรวม: " + grandTotal.ToString("N2", CultureInfo.InvariantCulture)
                 : "ยอดรวม: -";
-            int pts = CalcPoints(eligibleTotal);
-            _lblPreviewPoints.Text = pts > 0
-                ? "แต้มที่จะได้รับ: " + pts.ToString(CultureInfo.InvariantCulture)
-                : "แต้มที่จะได้รับ: -";
+            _lblPreviewPoints.Text = "กำลังตรวจสอบโปรส่วนกลาง…";
             RefreshEmptyStates();
         }
 
@@ -356,7 +383,7 @@ namespace SCCRMonPOS
                 return;
             }
 
-            int pts = _receipt != null ? CalcPoints(CalcEligibleTotal(_receipt)) : 0;
+            int pts = _centralQuotePoints ?? 0;
             _lblMemberName.Text = member.DisplayName + (string.IsNullOrWhiteSpace(member.Phone) ? "" : " | " + member.Phone);
             if (!member.PointsAvailable)
             {
@@ -600,7 +627,7 @@ namespace SCCRMonPOS
                 CashierStaffCode = _staffCode,
                 SoldAt = FormatSoldAt(_receipt),
                 TotalAmount = eligibleTotal,
-                PreviewPoints = CalcPoints(eligibleTotal),
+                PreviewPoints = _centralQuotePoints ?? CalcPoints(eligibleTotal),
                 MemberId = _selectedMember.Id,
                 Items = items
             };
@@ -608,6 +635,7 @@ namespace SCCRMonPOS
 
         private void ShowSuccess(LoyaltyClaimResponse response)
         {
+            _promotionTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
             _lblStatus.Text = "สะสมแต้มสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) +
                               " แต้ม | ยอดรวม " + response.NewPointsBalance.ToString(CultureInfo.InvariantCulture) + " แต้ม";
