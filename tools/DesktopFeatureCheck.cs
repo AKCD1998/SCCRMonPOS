@@ -28,7 +28,11 @@ internal static class DesktopFeatureCheck
     {
         try
         {
-            if (args.Length == 2 && args[0] == "--verify-release")
+            if (args.Length == 2 && args[0] == "--live-channel")
+            {
+                LiveChannel(args[1]).GetAwaiter().GetResult();
+            }
+            else if (args.Length == 2 && args[0] == "--verify-release")
             {
                 stage = "admin-signature";
                 var release = UpdateRelease.Verify(File.ReadAllText(args[1]));
@@ -59,6 +63,26 @@ internal static class DesktopFeatureCheck
         return new UpdateRelease { SchemaVersion = 1, ReleaseId = "test-" + version, Version = version,
             DownloadUrl = "https://github.com/AKCD1998/SCCRMonPOS/releases/download/test-" + version + "/SCCRMonPOS.exe",
             Sha256 = UpdateRelease.HashFile(path), Size = new FileInfo(path).Length, Notes = "Synthetic test", SourceCommit = new string('a', 40), PublishedAt = DateTime.UtcNow.ToString("o") };
+    }
+
+    // Reads the real public channel and explicitly downloads its signed asset
+    // into an isolated fixture. Never installs or launches the companion.
+    private static async Task LiveChannel(string previousExe)
+    {
+        stage = "live-public-channel";
+        string root = Path.Combine(Path.GetTempPath(),"sccrm-channel-check-"+Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string target = Path.Combine(root,"SCCRMonPOS.exe"); File.Copy(previousExe,target);
+        string previousHash = UpdateRelease.HashFile(target);
+        using(var service=new UpdateService(target))
+        {
+            await service.CheckAsync(); Check(service.Available != null);
+            Check(UpdateRelease.HashFile(target)==previousHash);
+            string downloaded=await service.StageAsync(service.Available,service.Envelope,CancellationToken.None);
+            service.Available.VerifyExecutable(downloaded); Check(true);
+            Check(UpdateRelease.HashFile(target)==previousHash);
+            Console.WriteLine("{\"channelLive\":true,\"version\":\""+service.Available.Version+"\",\"signatureAndDownloadVerified\":true,\"installedOrLaunched\":false}");
+        }
     }
     private static string Sign(UpdateRelease release, RSACryptoServiceProvider key)
     {
