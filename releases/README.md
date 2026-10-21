@@ -40,5 +40,9 @@ If publication creates a GitHub release but a later step fails, the old website
 recommendation remains in place. Inspect the existing release before retrying;
 do not recreate or overwrite its assets. With its staged `stable.json` and Setup,
 run `Update-WebReleaseCatalog.ps1 -ReleaseId <tag> -ManifestPath <manifest>
--InstallerPath <setup> -RecommendReleaseId <tag>`, then use the publish command's
-`-RollbackTo <tag>` path to announce the reviewed existing release.
+-InstallerPath <setup> -RecommendReleaseId <tag>`. Copy that staged `stable.json`
+to `releases/stable.json`, then review, commit and push **both** announcement
+files together. The normal publisher requires a clean checkout, so do not call
+its rollback path while these recovery files are still uncommitted. If the
+announcement commit already exists and only its push failed, inspect/fetch the
+remote and push the existing commit instead of generating another release.
