@@ -37,7 +37,7 @@ namespace SCCRMonPOS
             _medRecord = existing != null ? existing.PharmacyMedRecord : null;
             InitializeComponent();
             WireEvents();
-            AddMedRecordButton();
+            if (existing == null || existing.PharmacyMedRecordAvailable) AddMedRecordButton();
             if (IsEditMode) ApplyEditModeStyle();
             if (IsEditMode) Prefill(existing);
         }
@@ -193,6 +193,8 @@ namespace SCCRMonPOS
                     Email = _txtEmail.Text.Trim(),
                     MemberCode = _existing.MemberCode,
                     CurrentPoints = _existing.CurrentPoints,
+                    PointsAvailable = result.PointsAvailable,
+                    PharmacyMedRecordAvailable = result.PharmacyMedRecordAvailable,
                     Sex = sex,
                     Dob = dob,
                     Remark = _txtRemark.Text.Trim(),

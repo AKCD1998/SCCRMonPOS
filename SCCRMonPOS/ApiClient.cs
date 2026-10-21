@@ -53,6 +53,8 @@ namespace SCCRMonPOS
         public string Email         { get; set; }
         public string MemberCode    { get; set; }
         public int    CurrentPoints { get; set; }
+        public bool PointsAvailable { get; set; } = true;
+        public bool PharmacyMedRecordAvailable { get; set; } = true;
     }
 
     public class LoyaltyClaimItem
@@ -151,6 +153,8 @@ namespace SCCRMonPOS
         public string Email { get; set; }
         public string MemberCode { get; set; }
         public int    CurrentPoints { get; set; }
+        public bool PointsAvailable { get; set; } = true;
+        public bool PharmacyMedRecordAvailable { get; set; } = true;
         public string Sex { get; set; }
         public string Dob { get; set; }
         public string Remark { get; set; }
@@ -398,14 +402,7 @@ namespace SCCRMonPOS
                 if (customer != null) return MapCustomerToMemberSearchResult(customer);
             }
 
-            var results = ParseMemberSearchResults(json);
-            if (results != null && results.Length > 0) return results[0];
-
-            // Backend may return a single object rather than array
-            var single = ParseSingleMember(json);
-            if (single != null) return single;
-
-            throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+            return ParseMemberSearchResultFromApiResponse(json);
         }
 
         public async Task<LoyaltyClaimResponse> SubmitLoyaltyClaimAsync(LoyaltyClaimRequest request)
@@ -464,6 +461,8 @@ namespace SCCRMonPOS
             [DataMember(Name = "email")]         public string Email         { get; set; }
             [DataMember(Name = "memberCode")]    public string MemberCode    { get; set; }
             [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
+            [DataMember(Name = "pointsAvailable")] public bool? PointsAvailable { get; set; }
+            [DataMember(Name = "pharmacyMedRecordAvailable")] public bool? PharmacyMedRecordAvailable { get; set; }
         }
 
         [DataContract] private sealed class LoyaltyClaimResponseDto
@@ -600,6 +599,8 @@ namespace SCCRMonPOS
             [DataMember(Name = "memberCode")]     public string MemberCodeCC  { get; set; }
             [DataMember(Name = "current_points")] public int    CurrentPoints { get; set; }
             [DataMember(Name = "currentPoints")]  public int    CurrentPointsCC { get; set; }
+            [DataMember(Name = "pointsAvailable")] public bool? PointsAvailable { get; set; }
+            [DataMember(Name = "pharmacyMedRecordAvailable")] public bool? PharmacyMedRecordAvailable { get; set; }
             [DataMember(Name = "sex")]            public string Sex           { get; set; }
             [DataMember(Name = "dob")]            public string Dob           { get; set; }
             [DataMember(Name = "remark")]         public string Remark        { get; set; }
@@ -700,12 +701,16 @@ namespace SCCRMonPOS
         {
             try
             {
+                if ((json ?? "").TrimStart().StartsWith("[", StringComparison.Ordinal))
+                {
+                    var items = ParseMemberSearchResults(json);
+                    if (items.Length > 0) return items[0];
+                    throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
+                }
                 var wrapped = Deserialize<MemberApiResponseDto>(json);
                 if (wrapped?.Member != null) return MapMemberSearchResult(wrapped.Member);
                 var single = ParseSingleMember(json);
                 if (single != null) return single;
-                var arr = ParseMemberSearchResults(json);
-                if (arr != null && arr.Length > 0) return arr[0];
                 throw new ApiException("เซิร์ฟเวอร์ไม่ส่งข้อมูลสมาชิกกลับมา");
             }
             catch (ApiException) { throw; }
@@ -726,6 +731,8 @@ namespace SCCRMonPOS
                 Email         = m.Email,
                 MemberCode    = m.MemberCode ?? m.MemberCodeCC,
                 CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
+                PointsAvailable = m.PointsAvailable ?? true,
+                PharmacyMedRecordAvailable = m.PharmacyMedRecordAvailable ?? true,
                 Sex = m.Sex,
                 Dob = m.Dob,
                 Remark = m.Remark,
@@ -745,7 +752,9 @@ namespace SCCRMonPOS
                 Phone         = m.Phone,
                 Email         = m.Email,
                 MemberCode    = m.MemberCode ?? m.MemberCodeCC,
-                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC
+                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
+                PointsAvailable = m.PointsAvailable ?? true,
+                PharmacyMedRecordAvailable = m.PharmacyMedRecordAvailable ?? true
             };
         }
 
@@ -762,7 +771,9 @@ namespace SCCRMonPOS
                     Phone         = dto.Phone,
                     Email         = dto.Email,
                     MemberCode    = dto.MemberCode,
-                    CurrentPoints = dto.CurrentPoints
+                    CurrentPoints = dto.CurrentPoints,
+                    PointsAvailable = dto.PointsAvailable ?? true,
+                    PharmacyMedRecordAvailable = dto.PharmacyMedRecordAvailable ?? true
                 };
             }
             catch { return null; }
@@ -909,7 +920,9 @@ namespace SCCRMonPOS
                             Phone         = dtos[i].Phone,
                             Email         = dtos[i].Email,
                             MemberCode    = dtos[i].MemberCode,
-                            CurrentPoints = dtos[i].CurrentPoints
+                            CurrentPoints = dtos[i].CurrentPoints,
+                            PointsAvailable = dtos[i].PointsAvailable ?? true,
+                            PharmacyMedRecordAvailable = dtos[i].PharmacyMedRecordAvailable ?? true
                         };
                     }
                     return results;
@@ -1059,6 +1072,7 @@ namespace SCCRMonPOS
         private sealed class ErrorDto
         {
             [DataMember(Name = "error")] public string Error { get; set; }
+            [DataMember(Name = "message")] public string Message { get; set; }
         }
 
         // ── Internal helpers ────────────────────────────────────────────────────
@@ -1135,6 +1149,8 @@ namespace SCCRMonPOS
             return SendWithRetryAsync(() =>
             {
                 var req = new HttpRequestMessage(HttpMethod.Get, _baseUrl + path);
+                if (!string.IsNullOrEmpty(_staffToken))
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _staffToken);
                 if (!string.IsNullOrEmpty(_posApiKey))
                     req.Headers.Add("x-pos-api-key", _posApiKey);
                 return req;
@@ -1149,6 +1165,8 @@ namespace SCCRMonPOS
                 {
                     Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
                 };
+                if (!string.IsNullOrEmpty(_staffToken))
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _staffToken);
                 if (!string.IsNullOrEmpty(_posApiKey))
                     req.Headers.Add("x-pos-api-key", _posApiKey);
                 return req;
@@ -1241,7 +1259,7 @@ namespace SCCRMonPOS
             try
             {
                 var dto = Deserialize<ErrorDto>(json);
-                return string.IsNullOrEmpty(dto?.Error) ? null : dto.Error;
+                return !string.IsNullOrEmpty(dto?.Error) ? dto.Error : dto?.Message;
             }
             catch { return null; }
         }

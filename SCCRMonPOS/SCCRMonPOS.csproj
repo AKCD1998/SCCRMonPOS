@@ -52,6 +52,12 @@
   <ItemGroup>
     <Compile Include="AdaPosWatcher.cs" />
     <Compile Include="AppSettingsProvider.cs" />
+    <Compile Include="CustomerDisplay.cs" />
+    <Compile Include="CashierQrOverlay.cs" />
+    <Compile Include="Updates\UpdateRelease.cs" />
+    <Compile Include="Updates\UpdateInstaller.cs" />
+    <Compile Include="Updates\UpdateService.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlobalHotKeyManager.cs" />
     <Compile Include="PurchaseHistoryForm.cs" />
@@ -96,6 +102,12 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\RegistrationQr.png">
+      <LogicalName>SCCRMonPOS.RegistrationQr.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\UpdatePublicKey.xml">
+      <LogicalName>SCCRMonPOS.UpdatePublicKey.xml</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="MemberClaimForm.resx">
       <DependentUpon>MemberClaimForm.cs</DependentUpon>
     </EmbeddedResource>

@@ -12,10 +12,20 @@ namespace SCCRMonPOS
     static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            if (args.Length > 0)
+            {
+                if (args.Length == 2 && args[0] == "--apply-update")
+                {
+                    try { Updates.UpdateInstaller.Run(args[1]); }
+                    catch (Exception) { MessageBox.Show("อัปเดตไม่สำเร็จ กรุณาติดต่อแอดมินเพื่อตรวจไฟล์โปรแกรมและสำรองรุ่นเดิม", "SCCRM — อัปเดต", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                }
+                return;
+            }
 
             // Single-instance guard — "Global\" prefix works across user sessions
             bool createdNew;

@@ -40,12 +40,18 @@ namespace SCCRMonPOS
         private readonly object _receiptLock = new object();
         private MemberClaimForm _activeMemberClaimForm;
         private ToolStripMenuItem _miWatcherStatus;
+        private CustomerDisplayController _customerDisplay;
+        private Updates.UpdateService _updates;
+        private Timer _updateTimer;
+        private ToolStripMenuItem _miUpdate;
+        private Updates.UpdateForm _updateForm;
 
         // ─────────────────────────────────────────────────────────────────────
 
         public TrayAppContext()
         {
             Directory.CreateDirectory(_dataFolder);
+            _customerDisplay = new CustomerDisplayController(_dataFolder);
 
             string baseUrl = AppSettingsProvider.Get("ApiBaseUrl", "https://sc-official-website.onrender.com");
 
@@ -65,6 +71,7 @@ namespace SCCRMonPOS
                 _api.SetStaffToken(_auth.StaffToken);
 
             InitTrayIcon();
+            InitUpdates();
 
             if (!_auth.HasToken || _api.IsTokenExpired())
             {
@@ -75,7 +82,7 @@ namespace SCCRMonPOS
             else
             {
                 InitWatcher();
-                _trayIcon.ShowBalloonTip(2000, "SCCRM", "พร้อมใช้งาน — กด Ctrl+Alt+Q เพื่อสะสมแต้ม", ToolTipIcon.Info);
+                _trayIcon.ShowBalloonTip(2000, "SCCRM", "พร้อมใช้งาน — กด Ctrl+Alt+Q เพื่อเปิดระบบสมาชิก", ToolTipIcon.Info);
             }
         }
 
@@ -90,7 +97,7 @@ namespace SCCRMonPOS
             {
                 InitWatcher();
                 _trayIcon.ShowBalloonTip(2000, "SCCRM",
-                    "เข้าสู่ระบบสำเร็จ — กด Ctrl+Alt+Q เพื่อสะสมแต้ม", ToolTipIcon.Info);
+                    "เข้าสู่ระบบสำเร็จ — กด Ctrl+Alt+Q เพื่อเปิดระบบสมาชิก", ToolTipIcon.Info);
             }
             else
             {
@@ -108,7 +115,10 @@ namespace SCCRMonPOS
             };
 
             var menu = new ContextMenuStrip();
-            menu.Items.Add("สะสมแต้ม (Ctrl+Alt+Q)", null, (s, e) => OpenMemberClaimForm());
+            menu.Items.Add("สมาชิก / สะสมแต้ม (Ctrl+Alt+Q)", null, (s, e) => OpenMemberClaimForm());
+            menu.Items.Add("ปิด QR บนจอลูกค้า", null, (s, e) => _customerDisplay.Hide());
+            _miUpdate = new ToolStripMenuItem("ตรวจสอบรุ่นใหม่…", null, async (s, e) => await CheckUpdatesAsync(true));
+            menu.Items.Add(_miUpdate);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_miWatcherStatus);
             menu.Items.Add(new ToolStripSeparator());
@@ -133,6 +143,7 @@ namespace SCCRMonPOS
         {
             if (_watcher != null) return;
             _watcher = new AdaPosWatcher(_initialWatcherWatermark, _watcherDiagnosticsEnabled);
+            RegisterHotKey();
             if (!_watcher.IsEnabled)
             {
                 LogRuntime("AdaPos watcher is disabled by config.");
@@ -147,7 +158,55 @@ namespace SCCRMonPOS
             _watcher.Start();
             LogRuntime("AdaPos watcher started.");
 
-            RegisterHotKey();
+        }
+
+        private void InitUpdates()
+        {
+            _updates = new Updates.UpdateService(Application.ExecutablePath,
+                AppSettingsProvider.Get("UpdateManifestUrl", Updates.UpdateService.DefaultManifestUrl));
+            _updates.UpdateAvailable += release => _trayIcon.ShowBalloonTip(6000, "SCCRM มีรุ่นที่แอดมินแนะนำ",
+                "รุ่น " + release.Version + " — เลือกอัปเดตเมื่อสะดวกจากเมนูข้างนาฬิกา", ToolTipIcon.Info);
+            _updateTimer = new Timer { Interval = 15000 };
+            _updateTimer.Tick += async (s, e) => { _updateTimer.Interval = 5 * 60 * 1000; await CheckUpdatesAsync(false); };
+            _updateTimer.Start();
+        }
+
+        private async Task CheckUpdatesAsync(bool manual)
+        {
+            try
+            {
+                await _updates.CheckAsync();
+                _miUpdate.Text = _updates.Available == null ? "ตรวจสอบรุ่นใหม่…" : "มีอัปเดต " + _updates.Available.Version + " (เลือกติดตั้ง)";
+                _activeMemberClaimForm?.ShowUpdateNotice(_updates.Available?.Version, OpenUpdateForm);
+                if (manual)
+                {
+                    if (_updates.Available != null) OpenUpdateForm();
+                    else MessageBox.Show("ยังไม่มีรุ่นอื่นที่แอดมินแนะนำ โปรแกรมรุ่นนี้ใช้งานต่อได้", "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch
+            {
+                if (manual) MessageBox.Show("ตรวจสอบประกาศอัปเดตไม่ได้ในขณะนี้ โปรแกรมรุ่นเดิมยังใช้งานต่อได้", "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private bool CanRestartForUpdate()
+        {
+            return (_activeMemberClaimForm == null || _activeMemberClaimForm.IsDisposed) && !_customerDisplay.IsShowing;
+        }
+
+        private void OpenUpdateForm()
+        {
+            if (_updates.Available == null) return;
+            if (_updateForm != null && !_updateForm.IsDisposed) { _updateForm.Activate(); return; }
+            if (!CanRestartForUpdate())
+            {
+                MessageBox.Show("กรุณาปิดหน้าสมาชิกและ QR บนจอลูกค้าก่อนอัปเดต", "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            _updateForm = new Updates.UpdateForm(_updates, CanRestartForUpdate, () => OnExit(this, EventArgs.Empty));
+            _updateForm.FormClosed += (s, e) => _updateForm = null;
+            _updateForm.Show();
         }
 
         // Called from the watcher background thread — cache only, no auto-popup.
@@ -253,6 +312,7 @@ namespace SCCRMonPOS
 
         private void RegisterHotKey()
         {
+            if (_hotKey != null) return;
             uint modifiers  = (uint)ReadInt("ClaimQrHotKeyModifiers",  3);    // Ctrl+Alt
             uint virtualKey = (uint)ReadHex("ClaimQrHotKeyVirtualKey", 0x51); // Q
 
@@ -296,7 +356,8 @@ namespace SCCRMonPOS
             lock (_receiptLock) prefill = _standingByReceipt;
 
             _activeMemberClaimForm = new MemberClaimForm(
-                _api, _watcher, _bahtPerPoint, _auth.DeviceId, prefill);
+                _api, _watcher, _bahtPerPoint, _auth.DeviceId, prefill, _customerDisplay);
+            _activeMemberClaimForm.ShowUpdateNotice(_updates?.Available?.Version, OpenUpdateForm);
 
             _activeMemberClaimForm.FormClosed += (s, e) =>
             {
@@ -420,6 +481,10 @@ namespace SCCRMonPOS
                 _hotKey?.Dispose();
                 _trayIcon?.Dispose();
                 _activeMemberClaimForm?.Dispose();
+                _customerDisplay?.Dispose();
+                _updateTimer?.Dispose();
+                _updates?.Dispose();
+                _updateForm?.Dispose();
             }
             base.Dispose(disposing);
         }

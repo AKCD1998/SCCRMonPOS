@@ -1,5 +1,14 @@
 # SCCRMonPOS — How It Works (Current State)
 
+> Update 2026-10-21: basic Supabase membership support changes the detail/edit
+> authentication and optional-table behavior described below. See
+> [POS_MEMBERS_SUPABASE_2026-10-21.md](POS_MEMBERS_SUPABASE_2026-10-21.md).
+> The updated executable uses the existing staff session for member detail/edit,
+> supports QR-created identities and distinguishes unavailable points from zero.
+
+> QR customer display, blue/yellow cashier glow and signed optional updates are
+> documented in [CUSTOMER_DISPLAY_AND_UPDATES.md](CUSTOMER_DISPLAY_AND_UPDATES.md).
+
 วันที่วิเคราะห์: 2026-06-11 (จาก commit `e4cd4b5`)
 ผู้วิเคราะห์: Claude (อ่านโค้ดทั้ง repo + git history — **ไม่มีการแก้โค้ดใดๆ ในรอบนี้**)
 
