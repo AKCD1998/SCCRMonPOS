@@ -53,6 +53,7 @@
     <Compile Include="AdaPosWatcher.cs" />
     <Compile Include="AppSettingsProvider.cs" />
     <Compile Include="CustomerDisplay.cs" />
+    <Compile Include="CentralPromotions.cs" />
     <Compile Include="CashierQrOverlay.cs" />
     <Compile Include="Updates\UpdateRelease.cs" />
     <Compile Include="Updates\UpdateInstaller.cs" />

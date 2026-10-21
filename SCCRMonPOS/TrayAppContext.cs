@@ -117,6 +117,7 @@ namespace SCCRMonPOS
             var menu = new ContextMenuStrip();
             menu.Items.Add("สมาชิก / สะสมแต้ม (Ctrl+Alt+Q)", null, (s, e) => OpenMemberClaimForm());
             menu.Items.Add("ปิด QR บนจอลูกค้า", null, (s, e) => _customerDisplay.Hide());
+            menu.Items.Add("โปรโมชั่นสะสมแต้มส่วนกลาง", null, (s, e) => CentralPromotions.OpenPortal());
             _miUpdate = new ToolStripMenuItem("ตรวจสอบรุ่นใหม่…", null, async (s, e) => await CheckUpdatesAsync(true));
             menu.Items.Add(_miUpdate);
             menu.Items.Add(new ToolStripSeparator());
