@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+      - name: Check website release catalog
+        shell: pwsh
+        run: ./tools/WebReleaseCatalogCheck.ps1
       - name: Build and check desktop features
         shell: pwsh
         run: |

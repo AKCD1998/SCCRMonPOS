@@ -6,6 +6,12 @@ Current desktop feature guide: [QR customer display and optional updates](docs/C
 Basic Supabase member integration: [verified membership release](docs/POS_MEMBERS_SUPABASE_2026-10-21.md).
 Central promotions: [shared rules across app versions](docs/CENTRAL_PROMOTIONS.md).
 
+Release publication: use `tools/Publish-PosRelease.ps1` as documented in
+[the update-channel guide](releases/README.md). It now builds/uploads Setup and
+updates the signed website catalog with the desktop announcement. Do not edit
+StockDay's version metadata or manually replace only `releases/stable.json` for
+new releases; the website follows `releases/web-catalog.json` automatically.
+
 ---
 
 ## Local Secret Setup

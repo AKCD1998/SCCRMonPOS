@@ -54,7 +54,10 @@ Hotkey ใช้งานสมาชิกได้แม้ปิด AdaPos wa
 เครื่องแอดมินต้องมี Git, GitHub CLI ที่ลงชื่อเข้าใช้แล้ว, Visual Studio MSBuild
 และ .NET Framework 4.8 targeting pack ก่อนปล่อยจริงต้อง review, commit และ push
 source ที่ต้องการไป `master` ให้ตรงกับ `origin/master` และ checkout ต้องสะอาด
-คำสั่ง publish จะ commit เฉพาะ `releases/stable.json` ที่มันสร้างเอง
+คำสั่ง publish จะสร้างตัวติดตั้งและ commit `releases/stable.json` กับ
+`releases/web-catalog.json` พร้อมกัน เว็บ StockDay อ่านข้อมูลรุ่นที่ลงลายเซ็นนี้
+แล้วจัดปุ่มรุ่นแนะนำ ประวัติรุ่น วันที่ และสรุปอัปเดตเอง ไม่ต้อง deploy เว็บใหม่
+ต้องมี Inno Setup ตาม `tools/Build-Installer.ps1` ก่อนเผยแพร่
 
 กุญแจส่วนตัวที่ใช้ลงลายเซ็นถูกเก็บนอก repo ด้วย Windows DPAPI ของบัญชีแอดมิน
 ค่าเริ่มต้นคือ `%APPDATA%/SCCRMonPOS-Admin/update-signing-key.dpapi`
@@ -66,7 +69,7 @@ public key อยู่ใน `SCCRMonPOS/Assets/UpdatePublicKey.xml` และ�
 เตรียมไฟล์เพื่อตรวจโดยยังไม่เผยแพร่:
 
 ```powershell
-./tools/Publish-PosRelease.ps1 -ReleaseId pos-1.1.0 -Version 1.1.0 -NotesFile ./docs/release-notes-1.1.0.md -PrepareOnly
+./tools/Publish-PosRelease.ps1 -ReleaseId pos-1.3.2 -Version 1.3.2 -NotesFile ./docs/release-notes-1.3.2.md -PrepareOnly
 ```
 
 การเตรียมจาก source ที่ยังไม่ commit จะมี `sourceDirty: true` เพื่อใช้ตรวจในเครื่อง
@@ -75,8 +78,13 @@ public key อยู่ใน `SCCRMonPOS/Assets/UpdatePublicKey.xml` และ�
 ปล่อยรุ่นจริงตามคำสั่งแอดมิน (สร้าง GitHub Release และประกาศให้ทุกเครื่อง):
 
 ```powershell
-./tools/Publish-PosRelease.ps1 -ReleaseId pos-1.1.1 -Version 1.1.1 -NotesFile ./docs/release-notes-1.1.1.md
+./tools/Publish-PosRelease.ps1 -ReleaseId pos-1.3.2 -Version 1.3.2 -NotesFile ./docs/release-notes-1.3.2.md
 ```
+
+ใช้เลขรุ่นใหม่ตั้งแต่ 1.3.0 ขึ้นไปและเขียน bullet สรุปสิ่งที่เปลี่ยนไว้ต้นไฟล์
+release notes สามข้อแรกจะปรากฏบนเว็บอัตโนมัติ ตัวอย่าง 1.3.2 เป็นเลขรุ่นถัดไป
+ที่ต้องเตรียม notes ให้ตรงก่อนรัน รุ่นที่ไม่มีระบบตรวจสิทธิ์เครื่องจะไม่ถูกเสนอให้ดาวน์โหลด
+หาก Inno Setup อยู่นอกตำแหน่งมาตรฐาน ให้เพิ่ม `-InstallerCompilerPath <path-to-ISCC.exe>`
 
 ย้อนรุ่นที่แนะนำไปยัง release ที่เคยลงลายเซ็นไว้:
 

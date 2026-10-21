@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Build')][string]$NotesFile,
     [Parameter(Mandatory, ParameterSetName = 'Rollback')][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$')][string]$RollbackTo,
     [Parameter(ParameterSetName = 'Build')][switch]$PrepareOnly,
+    [Parameter(ParameterSetName = 'Build')][string]$InstallerCompilerPath,
     [string]$KeyPath = (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'SCCRMonPOS-Admin/update-signing-key.dpapi')
 )
 $ErrorActionPreference = 'Stop'
@@ -79,9 +80,21 @@ try {
             [IO.File]::WriteAllText($posManifest, $posEnvelope, [Text.UTF8Encoding]::new($false))
         } finally { [Array]::Clear($posPrivate,0,$posPrivate.Length); $posSigner.Dispose() }
         $null = Read-PosManifest $posManifest
+        if ($PrepareOnly -and $posDirty) {
+            [IO.File]::WriteAllText((Join-Path $posStage 'notes.md'), $posNotes, [Text.UTF8Encoding]::new($false))
+            Write-Output "Prepared locally only: $posStage. Setup requires a reviewed clean source."
+            return
+        }
+        $posSetupDirectory = Join-Path $posStage 'installer'
+        & (Join-Path $PSScriptRoot 'Build-Installer.ps1') -ReleaseDirectory $posStage -OutputDirectory $posSetupDirectory -CompilerPath $InstallerCompilerPath
+        $posSetup = Join-Path $posSetupDirectory ("SCCRMonPOS-Setup-$Version.exe")
+        if (!(Test-Path -LiteralPath $posSetup)) { throw 'Installer was not produced; release has not been published.' }
+        $posSetupHash = $posSetup + '.sha256'
+        [IO.File]::WriteAllText($posSetupHash, ((Get-FileHash -LiteralPath $posSetup -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($posSetup) + "`n"), [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $posStage 'notes.md'), $posNotes, [Text.UTF8Encoding]::new($false))
         if ($PrepareOnly) { Write-Output "Prepared locally only: $posStage"; return }
-        Invoke-PosCommand 'gh' @('release','create',$ReleaseId,'--repo',$posRepository,'--target',$posPayload.sourceCommit,'--title',"SCCRMonPOS $Version",'--notes-file',(Join-Path $posStage 'notes.md'),$posExe,$posManifest)
+        Invoke-PosCommand 'gh' @('release','create',$ReleaseId,'--repo',$posRepository,'--target',$posPayload.sourceCommit,'--title',"SCCRMonPOS $Version",'--notes-file',(Join-Path $posStage 'notes.md'),$posExe,$posManifest,$posSetup,$posSetupHash)
+        & (Join-Path $PSScriptRoot 'Update-WebReleaseCatalog.ps1') -ReleaseId $ReleaseId -ManifestPath $posManifest -InstallerPath $posSetup -RecommendReleaseId $ReleaseId -KeyPath $KeyPath
     } else {
         if ($RollbackTo.Contains('..')) { throw 'Invalid release identifier.' }
         $posStage = Join-Path $posRoot ('build-verify/channel-' + [Guid]::NewGuid().ToString('N'))
@@ -90,17 +103,18 @@ try {
         $posManifest = Join-Path $posStage 'stable.json'
         $posPrevious = Read-PosManifest $posManifest
         if ($posPrevious.releaseId -ne $RollbackTo -or $posPrevious.sourceDirty -or $posPrevious.downloadUrl -ne "https://github.com/$posRepository/releases/download/$RollbackTo/SCCRMonPOS.exe") { throw 'Unexpected release metadata.' }
+        & (Join-Path $PSScriptRoot 'Update-WebReleaseCatalog.ps1') -RecommendReleaseId $RollbackTo -KeyPath $KeyPath
     }
-    # Only this manifest is committed by the publishing command. Publishing a
+    # Commit the desktop and website announcements together. Publishing a
     # channel announces a recommendation; clients still require a local click.
     New-Item -ItemType Directory -Force -Path (Join-Path $posRoot 'releases') | Out-Null
     Copy-Item -LiteralPath $posManifest -Destination (Join-Path $posRoot 'releases/stable.json') -Force
-    Invoke-PosCommand 'git' @('add','--','releases/stable.json')
-    & git diff --cached --quiet -- releases/stable.json
+    Invoke-PosCommand 'git' @('add','--','releases/stable.json','releases/web-catalog.json')
+    & git diff --cached --quiet -- releases/stable.json releases/web-catalog.json
     if ($LASTEXITCODE -eq 0) { Write-Output 'This release is already announced.'; return }
     if ($LASTEXITCODE -ne 1) { throw 'Cannot inspect channel change.' }
     $posAnnounced = Read-PosManifest (Join-Path $posRoot 'releases/stable.json')
-    Invoke-PosCommand 'git' @('commit','-m',("Recommend POS release " + $posAnnounced.releaseId),'--','releases/stable.json')
+    Invoke-PosCommand 'git' @('commit','-m',("Recommend POS release " + $posAnnounced.releaseId),'--','releases/stable.json','releases/web-catalog.json')
     Invoke-PosCommand 'git' @('push','origin','HEAD:master')
     Write-Output "Announced $($posAnnounced.version). Online clients check within five minutes; installation remains optional."
 } finally { Pop-Location }
