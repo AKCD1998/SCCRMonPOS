@@ -118,7 +118,7 @@ namespace SCCRMonPOS
             this._btnTabHistory.Name = "_btnTabHistory";
             this._btnTabHistory.Size = new System.Drawing.Size(99, 34);
             this._btnTabHistory.TabIndex = 1;
-            this._btnTabHistory.Text = "ประวัติการสะสม";
+            this._btnTabHistory.Text = "ประวัติการซื้อ";
             this._btnTabHistory.UseVisualStyleBackColor = false;
             // 
             // _btnTabMembers
@@ -540,7 +540,7 @@ namespace SCCRMonPOS
             this._btnConfirm.Name = "_btnConfirm";
             this._btnConfirm.Size = new System.Drawing.Size(188, 28);
             this._btnConfirm.TabIndex = 19;
-            this._btnConfirm.Text = "ยืนยันการสะสมแต้ม";
+            this._btnConfirm.Text = "ยืนยันบิล / สะสมแต้ม";
             this._btnConfirm.UseVisualStyleBackColor = false;
             // 
             // _extraMenu

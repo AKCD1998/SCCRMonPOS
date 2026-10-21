@@ -54,6 +54,8 @@ try {
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/member-api-check/MemberApiCheck.exe') @()
         Invoke-PosCommand $posMsbuild @('tools/DeviceAccessCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/device-access-check/DeviceAccessCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/PurchaseHistoryCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
+        Invoke-PosCommand (Join-Path $posRoot 'build-verify/purchase-history-check/PurchaseHistoryCheck.exe') @()
         $posExe = Join-Path $posStage 'SCCRMonPOS.exe'
         Copy-Item -LiteralPath 'SCCRMonPOS/bin/Release/SCCRMonPOS.exe' -Destination $posExe
         $posManifest = Join-Path $posStage 'stable.json'

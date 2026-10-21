@@ -18,6 +18,8 @@ namespace SCCRMonPOS
         private LinkLabel _updateNotice;
         private int? _centralQuotePoints;
         private bool _quoteLoading;
+        private bool _uiBusy;
+        private bool _claimCompleted;
         private Timer _promotionTimer;
 
         public void ShowUpdateNotice(string version, Action openUpdates)
@@ -565,10 +567,10 @@ namespace SCCRMonPOS
 
         private async Task ConfirmClaimAsync()
         {
-            if (_receipt == null || _selectedMember == null)
+            if (!CanConfirm())
                 return;
 
-            SetStatus("กำลังบันทึกการสะสมแต้ม...", false, Color.DimGray);
+            SetStatus("กำลังบันทึกบิลและแต้ม...", false, Color.DimGray);
             SetUiBusy(true);
 
             LoyaltyClaimResponse response = null;
@@ -596,6 +598,7 @@ namespace SCCRMonPOS
                 return;
             }
 
+            _claimCompleted = true;
             ShowSuccess(response);
         }
 
@@ -609,6 +612,10 @@ namespace SCCRMonPOS
                     PosReceiptItem src = _receipt.Items[i];
                     items[i] = new LoyaltyClaimItem
                     {
+                        Seq = src.Seq,
+                        Barcode = src.Barcode,
+                        LineDiscount = src.LineDiscount,
+                        PromotionCode = src.PromotionCode,
                         ProductCode = src.ProductCode ?? "",
                         ProductName = src.ProductName ?? "",
                         Qty = src.Qty,
@@ -627,6 +634,10 @@ namespace SCCRMonPOS
                 CashierStaffCode = _staffCode,
                 SoldAt = FormatSoldAt(_receipt),
                 TotalAmount = eligibleTotal,
+                ReceiptTotalAmount = _receipt.GrandTotal,
+                ReceiptDiscount = _receipt.Discount,
+                PosCode = _receipt.PosCode,
+                ReceiptCashierCode = _receipt.CashierCode,
                 PreviewPoints = _centralQuotePoints ?? CalcPoints(eligibleTotal),
                 MemberId = _selectedMember.Id,
                 Items = items
@@ -637,7 +648,7 @@ namespace SCCRMonPOS
         {
             _promotionTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
-            _lblStatus.Text = "สะสมแต้มสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) +
+            _lblStatus.Text = "บันทึกบิลสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) +
                               " แต้ม | ยอดรวม " + response.NewPointsBalance.ToString(CultureInfo.InvariantCulture) + " แต้ม";
             _btnConfirm.Enabled = false;
             _btnCancel.Text = "ปิด";
@@ -655,6 +666,10 @@ namespace SCCRMonPOS
 
         private void SetUiBusy(bool busy)
         {
+            _uiBusy = busy;
+            _txtReceiptNo.Enabled = !busy;
+            _txtMemberSearch.Enabled = !busy;
+            _dgvResults.Enabled = !busy;
             _btnLoadReceipt.Enabled = !busy;
             _btnSearch.Enabled = !busy;
             _btnNewMember.Enabled = !busy;
@@ -670,7 +685,10 @@ namespace SCCRMonPOS
 
         private bool CanConfirm()
         {
-            return _receipt != null && CalcEligibleTotal(_receipt) > 0m && _selectedMember != null && _selectedMember.PointsAvailable;
+            return !_uiBusy && !_claimCompleted && _receipt != null && !_receipt.IsReturn && _receipt.DocType != "9" &&
+                !string.IsNullOrWhiteSpace(_receipt.DocNo) && !string.IsNullOrWhiteSpace(_receipt.BranchCode) &&
+                _receipt.GrandTotal > 0m && _receipt.Items != null && _receipt.Items.Count > 0 &&
+                _selectedMember != null && _selectedMember.PointsAvailable;
         }
 
         private void RefreshEmptyStates()
