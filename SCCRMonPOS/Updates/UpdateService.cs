@@ -69,6 +69,7 @@ namespace SCCRMonPOS.Updates
                         envelope = System.Text.Encoding.UTF8.GetString(bytes.ToArray());
                     }
                     var release = _verify(envelope);
+                    if (release.DeviceAccessVersion != 1) { Available = null; Envelope = null; return; }
                     if (string.Equals(release.Sha256, UpdateRelease.HashFile(_executable), StringComparison.OrdinalIgnoreCase))
                     { Available = null; Envelope = null; return; }
                     Available = release; Envelope = envelope;
@@ -90,6 +91,7 @@ namespace SCCRMonPOS.Updates
         public async Task<string> StageAsync(UpdateRelease release, string envelope, CancellationToken cancellation)
         {
             var signed = _verify(envelope);
+            signed.RequireDeviceAccess();
             if (signed.Sha256 != release.Sha256 || signed.DownloadUrl != release.DownloadUrl || signed.Size != release.Size)
                 throw new InvalidDataException("Release metadata changed.");
             release = signed;

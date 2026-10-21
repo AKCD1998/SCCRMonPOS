@@ -93,6 +93,7 @@
     <Compile Include="ReceiptWorkflowStore.cs" />
     <Compile Include="TrayAppContext.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="DeviceAccessGuard.cs" />
     <Compile Include="Models\PharmacyMedRecord.cs" />
     <Compile Include="Models\Member.cs" />
     <Compile Include="Models\PosReceipt.cs" />
@@ -103,6 +104,9 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\DevicePolicy.json">
+      <LogicalName>SCCRMonPOS.DevicePolicy.json</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\RegistrationQr.png">
       <LogicalName>SCCRMonPOS.RegistrationQr.png</LogicalName>
     </EmbeddedResource>

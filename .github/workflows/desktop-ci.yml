@@ -2,9 +2,9 @@ name: Desktop checks
 on:
   push:
     branches: [master]
-    paths: ['SCCRMonPOS/**', 'tools/**', '.github/workflows/desktop-ci.yml']
+    paths: ['SCCRMonPOS/**', 'tools/**', 'installer/**', '.github/workflows/desktop-ci.yml']
   pull_request:
-    paths: ['SCCRMonPOS/**', 'tools/**', '.github/workflows/desktop-ci.yml']
+    paths: ['SCCRMonPOS/**', 'tools/**', 'installer/**', '.github/workflows/desktop-ci.yml']
 permissions:
   contents: read
 jobs:
@@ -23,4 +23,8 @@ jobs:
           msbuild tools/MemberApiCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build-verify/member-api-check/MemberApiCheck.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/DeviceAccessCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/device-access-check/DeviceAccessCheck.exe
           exit $LASTEXITCODE

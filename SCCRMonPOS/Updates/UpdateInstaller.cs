@@ -70,6 +70,7 @@ namespace SCCRMonPOS.Updates
             Action<string> start, string publicKeyForTest = null)
         {
             var release = publicKeyForTest == null ? UpdateRelease.Verify(envelope) : UpdateRelease.Verify(envelope, publicKeyForTest);
+            release.RequireDeviceAccess();
             release.VerifyExecutable(staged);
             if (!string.Equals(UpdateRelease.HashFile(target), previousHash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Installed executable changed; check again before updating.");

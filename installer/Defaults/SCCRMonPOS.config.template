@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<configuration>
+  <startup>
+    <supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8" />
+  </startup>
+  <appSettings>
+    <add key="ApiBaseUrl" value="https://sc-official-website.onrender.com" />
+    <add key="BahtPerPoint" value="25" />
+    <!-- The administrator enables/configures the existing read-only POS watcher separately. -->
+    <add key="AdaPosEnabled" value="false" />
+  </appSettings>
+</configuration>

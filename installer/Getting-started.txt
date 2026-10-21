@@ -1,0 +1,30 @@
+SCCRM POS Companion
+==================
+
+Use an approved company computer with AdaSoftware installed. Connect to the
+company Tailscale network before installing or opening SCCRM, and keep it
+connected while using SCCRM. Contact your administrator if access is refused.
+
+1. Open SCCRM from the desktop shortcut or Start menu.
+2. Sign in using the staff PIN configured by your administrator.
+3. Press Ctrl+Alt+Q to open membership tools.
+4. Choose staff registration or show the registration QR on a customer display.
+
+Customer QR requires Windows to use Extend displays. The cashier can close it
+using the blue/yellow button at the top center of the cashier screen.
+
+Your administrator may recommend an updated release. SCCRM shows a notification;
+you choose when to download, install and restart the membership companion.
+
+Existing installation:
+Close SCCRM before installing and select its existing folder to keep using its
+configuration and local session. Setup never replaces an existing .exe.config.
+SCCRMonPOS.secrets.config and the data folder are retained when uninstalling.
+
+New installation:
+AdaPos database monitoring is disabled initially. Membership tools use the existing
+web backend. Your administrator configures staff-device access and any local POS
+connection using SCCRMonPOS.secrets.config or SCCRMONPOS__ environment settings.
+No production credentials are included in Setup.
+
+This installer was built with Inno Setup: https://jrsoftware.org/

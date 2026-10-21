@@ -20,6 +20,13 @@ namespace SCCRMonPOS.Updates
         [DataMember(Name = "notes")] public string Notes { get; set; }
         [DataMember(Name = "sourceCommit")] public string SourceCommit { get; set; }
         [DataMember(Name = "publishedAt")] public string PublishedAt { get; set; }
+        [DataMember(Name = "deviceAccessVersion")] public int DeviceAccessVersion { get; set; }
+
+        public void RequireDeviceAccess()
+        {
+            if (DeviceAccessVersion != 1)
+                throw new InvalidDataException("This release does not enforce the required device policy.");
+        }
 
         [DataContract]
         private sealed class Envelope

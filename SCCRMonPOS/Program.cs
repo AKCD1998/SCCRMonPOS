@@ -17,6 +17,17 @@ namespace SCCRMonPOS
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            string deviceError;
+            bool deviceAllowed = DeviceAccessGuard.Check(out deviceError);
+            bool checkOnly = args.Length == 1 && args[0] == "--check-device";
+            if (checkOnly) { Environment.ExitCode = deviceAllowed ? DeviceAccessGuard.ApprovedCheckExitCode : 20; return; }
+            if (!deviceAllowed)
+            {
+                Environment.ExitCode = 20;
+                MessageBox.Show(deviceError, "SCCRM — สิทธิ์เครื่อง", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             if (args.Length > 0)
             {
                 if (args.Length == 2 && args[0] == "--apply-update")
@@ -46,7 +57,18 @@ namespace SCCRMonPOS
                 Application.ThreadException += OnUnhandledThreadException;
                 AppDomain.CurrentDomain.UnhandledException += OnUnhandledDomainException;
 
-                Application.Run(new TrayAppContext());
+                string revokedError;
+                using (var context = new TrayAppContext())
+                using (var deviceMonitor = new DeviceAccessMonitor())
+                {
+                    Application.Run(context);
+                    revokedError = deviceMonitor.DeniedReason;
+                }
+                if (revokedError != null)
+                {
+                    Environment.ExitCode = 20;
+                    MessageBox.Show(revokedError + "\nปิด SCCRM แล้ว กรุณาแก้ไขการเชื่อมต่อก่อนเปิดใหม่", "SCCRM — สิทธิ์เครื่อง", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
 

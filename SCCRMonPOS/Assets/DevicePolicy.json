@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "tailnet": "akcd1998.github",
+  "devices": [
+    {
+      "nodeId": "n3AqXUmdkF11CNTRL",
+      "hostname": "SERVER004",
+      "ipv4": "100.113.59.42",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    },
+    {
+      "nodeId": "nKAsnKMrkZ11CNTRL",
+      "hostname": "SC_001",
+      "ipv4": "100.81.137.41",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    },
+    {
+      "nodeId": "nSKeeNSVgt11CNTRL",
+      "hostname": "POSSRV",
+      "ipv4": "100.106.107.80",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    },
+    {
+      "nodeId": "nFCuxvTVA521CNTRL",
+      "hostname": "POSSRV",
+      "ipv4": "100.77.101.94",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    },
+    {
+      "nodeId": "ndEzc41bWC21CNTRL",
+      "hostname": "server",
+      "ipv4": "100.90.166.72",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    }
+  ]
+}

@@ -60,7 +60,7 @@ internal static class DesktopFeatureCheck
 
     private static UpdateRelease Metadata(string path, string version = "1.2.0")
     {
-        return new UpdateRelease { SchemaVersion = 1, ReleaseId = "test-" + version, Version = version,
+        return new UpdateRelease { SchemaVersion = 1, DeviceAccessVersion = 1, ReleaseId = "test-" + version, Version = version,
             DownloadUrl = "https://github.com/AKCD1998/SCCRMonPOS/releases/download/test-" + version + "/SCCRMonPOS.exe",
             Sha256 = UpdateRelease.HashFile(path), Size = new FileInfo(path).Length, Notes = "Synthetic test", SourceCommit = new string('a', 40), PublishedAt = DateTime.UtcNow.ToString("o") };
     }

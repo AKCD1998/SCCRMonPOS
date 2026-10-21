@@ -52,11 +52,13 @@ try {
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/desktop-feature-check/DesktopFeatureCheck.exe') @()
         Invoke-PosCommand $posMsbuild @('tools/MemberApiCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/member-api-check/MemberApiCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/DeviceAccessCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
+        Invoke-PosCommand (Join-Path $posRoot 'build-verify/device-access-check/DeviceAccessCheck.exe') @()
         $posExe = Join-Path $posStage 'SCCRMonPOS.exe'
         Copy-Item -LiteralPath 'SCCRMonPOS/bin/Release/SCCRMonPOS.exe' -Destination $posExe
         $posManifest = Join-Path $posStage 'stable.json'
         $posPayload = [ordered]@{
-            schemaVersion = 1; releaseId = $ReleaseId; version = $Version
+            schemaVersion = 1; releaseId = $ReleaseId; version = $Version; deviceAccessVersion = 1
             downloadUrl = "https://github.com/$posRepository/releases/download/$ReleaseId/SCCRMonPOS.exe"
             sha256 = (Get-FileHash -LiteralPath $posExe -Algorithm SHA256).Hash.ToLowerInvariant()
             size = (Get-Item -LiteralPath $posExe).Length; notes = $posNotes
