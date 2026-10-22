@@ -20,16 +20,22 @@ namespace SCCRMonPOS
             string deviceError;
             bool deviceAllowed = DeviceAccessGuard.Check(out deviceError);
             bool checkOnly = args.Length == 1 && args[0] == "--check-device";
+            bool silentSetup = args.Length == 3 && args[0] == "--setup-adapos" && args[2] == "--silent";
             if (checkOnly) { Environment.ExitCode = deviceAllowed ? DeviceAccessGuard.ApprovedCheckExitCode : 20; return; }
             if (!deviceAllowed)
             {
                 Environment.ExitCode = 20;
-                MessageBox.Show(deviceError, "SCCRM — สิทธิ์เครื่อง", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!silentSetup) MessageBox.Show(deviceError, "SCCRM — สิทธิ์เครื่อง", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             if (args.Length > 0)
             {
+                if ((args.Length == 2 || args.Length == 3) && args[0] == "--setup-adapos" && (args.Length == 2 || args[2] == "--silent"))
+                {
+                    Environment.ExitCode = AdaPosSetup.Run(args[1], args.Length == 3);
+                    return;
+                }
                 if (args.Length == 2 && args[0] == "--apply-update")
                 {
                     try { Updates.UpdateInstaller.Run(args[1]); }

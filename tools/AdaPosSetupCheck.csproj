@@ -1,0 +1,14 @@
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><AssemblyName>AdaPosSetupCheck</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion><OutputPath>..\build-verify\adapos-setup-check\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" /><Reference Include="System.Core" /><Reference Include="System.Data" />
+    <Reference Include="System.Xml" /><Reference Include="System.Security" /><Reference Include="System.Runtime.Serialization" />
+    <Compile Include="AdaPosSetupCheck.cs" />
+    <ProjectReference Include="..\SCCRMonPOS\SCCRMonPOS.csproj"><Project>{3F1A2B4C-8D7E-4F9A-B1C2-D3E4F5A6B7C8}</Project><Name>SCCRMonPOS</Name></ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

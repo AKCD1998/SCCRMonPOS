@@ -51,6 +51,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AdaPosWatcher.cs" />
+    <Compile Include="AdaPosSetup.cs" />
     <Compile Include="AppSettingsProvider.cs" />
     <Compile Include="CustomerDisplay.cs" />
     <Compile Include="CentralPromotions.cs" />
