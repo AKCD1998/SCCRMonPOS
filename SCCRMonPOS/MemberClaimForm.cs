@@ -616,6 +616,8 @@ namespace SCCRMonPOS
                         Barcode = src.Barcode,
                         LineDiscount = src.LineDiscount,
                         PromotionCode = src.PromotionCode,
+                        UnitCode = src.UnitCode,
+                        UnitName = src.UnitName,
                         ProductCode = src.ProductCode ?? "",
                         ProductName = src.ProductName ?? "",
                         Qty = src.Qty,

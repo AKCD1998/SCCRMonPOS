@@ -145,7 +145,7 @@ namespace SCCRMonPOS
                     {
                         if (header != "TPSTSalHD" && !Regex.IsMatch(header, @"^TSHD\d{3}$")) throw new InvalidOperationException("รูปแบบตารางบิลไม่รองรับ");
                         string detail = header == "TPSTSalHD" ? "TPSTSalDT" : "TSDT" + header.Substring(4);
-                        command.CommandText = "SELECT TOP (0) FTShdDocNo,FTBchCode,FTPosCode,FTUsrCode,FDShdDocDate,FTShdDocTime,FCShdGrand,FCShdDis,FTShdDocType,FTShdStaPaid FROM dbo.[" + header + "]; SELECT TOP (0) FTShdDocNo,FNSdtSeqNo,FTPdtCode,FTPdtName,FTSdtBarCode,FCSdtQty,FCSdtSetPrice,FCSdtNet,FCSdtDis,FTPmhCode FROM dbo.[" + detail + "]";
+                        command.CommandText = "SELECT TOP (0) FTShdDocNo,FTBchCode,FTPosCode,FTUsrCode,FDShdDocDate,FTShdDocTime,FCShdGrand,FCShdDis,FTShdDocType,FTShdStaPaid FROM dbo.[" + header + "]; SELECT TOP (0) FTShdDocNo,FNSdtSeqNo,FTPdtCode,FTPdtName,FTSdtBarCode,FCSdtQty,FCSdtSetPrice,FCSdtNet,FCSdtDis,FTPmhCode,FTPunCode,FTSdtUnitName FROM dbo.[" + detail + "]";
                         using (var reader = command.ExecuteReader()) { while (reader.NextResult()) { } }
                         if (!string.IsNullOrWhiteSpace(settings.Branch))
                         {
