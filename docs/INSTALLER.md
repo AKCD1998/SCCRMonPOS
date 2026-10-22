@@ -1,4 +1,40 @@
-# Combined SCCRM installer — 1.3.2
+# Combined SCCRM installer — 1.3.6
+
+## 1.3.6: isolate receipts by branch and cash register
+
+The SQL server is shared by multiple registers. Earlier watchers combined all
+receipt tables without an FTPosCode/FTBchCode predicate, so a register could
+prefill or manually load another register's bill. Version 1.3.6 filters both
+automatic polling and document lookup by the configured branch AND FTPosCode,
+requires paid headers (FTShdStaPaid='3'), and checks ownership again during
+receipt refresh and before constructing a member claim. The member form and
+tray status show the bound branch/register. Returns are observed on their
+issuing register; the backend may still link a return to its original sale.
+
+The existing verified device policy now assigns SC_001 to branch 001 / POS 001,
+POS2 to branch 001 / POS 002, and branch 005 POSSRV to branch 005 / POS 001.
+These assignments are used only after the original node ID, hostname, address,
+tailnet and local AdaSoftware checks pass. They are not inferred from an IP or
+SQL server name. A copied config cannot override an assigned register.
+Other approved devices need explicit AdaPosBranchCode and AdaPosCode settings;
+setup offers both fields. If ownership cannot be resolved, receipt polling,
+lookup and member claims remain disabled while member management is available.
+
+Setup persists these non-secret settings alongside the existing connection,
+with the same backup/rollback behavior. Updating just the signed executable
+also resolves the verified assignments, without requiring an installer rerun.
+Each branch/register has its own receipt-watermark-<branch>-<pos>.json. The old
+global watermark is preserved and is not reused, so another register's cursor
+cannot skip the first register's bills. A new scoped cursor starts at app
+startup; it does not automatically claim historical bills.
+
+Verification: 131 offline assertions across desktop/member/device/history/
+setup/scope checks, plus 14 read-only native assertions against branch 001
+AdaAcc. Both registers loaded their own real receipt/items, refused the other's
+document number and retry, and their real polling queries returned only their
+own branch/register. A foreign-branch lookup was also rejected. No AdaAcc
+writes or loyalty claims were submitted. Physical installation and a cashier
+confirmation after upgrade are separate checks still to be performed.
 
 ## 1.3.5: slow SQL metadata checks
 
@@ -21,7 +57,7 @@ still fails closed if any verification cannot finish; no timeout is treated as
 approval. Existing app updates stay optional. Server-side latency may still
 require separate investigation if the larger bounded budget is exceeded.
 
-Download `SCCRMonPOS-Setup-1.3.2.exe` from the existing StockDay admin page. Exit
+Download `SCCRMonPOS-Setup-1.3.6.exe` from the existing StockDay admin page. Exit
 SCCRM first; AdaPos can remain open. There is no separate ZIP or command script.
 The same company device/Tailscale policy runs before any setup connection work.
 

@@ -24,7 +24,7 @@ namespace SCCRMonPOS
         internal enum VerificationStage { Connect, DatabasePermissions, TablePermissions, ReceiptTables, ReceiptColumns, Branch }
         internal sealed class Connection
         {
-            public string Server = @".\SQLEXPRESS", Database = "AdaAcc", User = "", Password = "", Branch = "";
+            public string Server = @".\SQLEXPRESS", Database = "AdaAcc", User = "", Password = "", Branch = "", Pos = "";
         }
 
         internal static int Run(string directory, bool silent)
@@ -36,6 +36,8 @@ namespace SCCRMonPOS
                 EnsureStopped();
                 settings = FindConnection(directory);
                 if (settings == null) throw new InvalidOperationException("ยังไม่พบค่าฐานข้อมูลบนเครื่อง กรุณาให้ผู้ดูแลระบุบัญชีที่อ่านข้อมูลอย่างเดียว");
+                ApplyApprovedTerminal(settings);
+                RequireTerminal(settings);
                 VerifyConnection(settings);
                 Apply(directory, settings);
                 return SuccessExitCode;
@@ -63,7 +65,8 @@ namespace SCCRMonPOS
                 if (!string.IsNullOrWhiteSpace(value)) values[key] = value;
             }
             var existing = new Connection { Server = Value(values, "AdaPosDbServer", @".\SQLEXPRESS"), Database = Value(values, "AdaPosDbName", "AdaAcc"),
-                User = Value(values, "AdaPosDbUser"), Password = Value(values, "AdaPosDbPassword") };
+                User = Value(values, "AdaPosDbUser"), Password = Value(values, "AdaPosDbPassword"),
+                Branch = Value(values, "AdaPosBranchCode"), Pos = Value(values, "AdaPosCode") };
             if (UsableIdentity(existing)) return existing;
 
             foreach (string drive in new[] { "D:\\", "C:\\" })
@@ -104,6 +107,19 @@ namespace SCCRMonPOS
         }
 
         private static bool UsableIdentity(Connection value) => !string.IsNullOrWhiteSpace(value.Server) && !string.IsNullOrWhiteSpace(value.User) && value.User.Trim().ToLowerInvariant() != "sa" && !string.IsNullOrEmpty(value.Password);
+        private static void ApplyApprovedTerminal(Connection value)
+        {
+            var device = DeviceAccessGuard.CurrentDevice;
+            if (device == null || string.IsNullOrEmpty(device.ReceiptBranchCode) || string.IsNullOrEmpty(device.ReceiptPosCode)) return;
+            value.Branch = device.ReceiptBranchCode; value.Pos = device.ReceiptPosCode;
+        }
+        private static void RequireTerminal(Connection value)
+        {
+            if (!Regex.IsMatch(value.Branch ?? "", "^[0-9]{3}$") || !Regex.IsMatch(value.Pos ?? "", "^[0-9]{3}$"))
+                throw new InvalidOperationException("กรุณากำหนดรหัสสาขาและเลขเครื่องขาย AdaPos อย่างละ 3 หลัก เพื่อป้องกันบิลข้ามเครื่อง");
+            if (DeviceAccessGuard.CurrentDevice != null && ReceiptTerminalScope.Resolve(DeviceAccessGuard.CurrentDevice, value.Branch, value.Pos) == null)
+                throw new InvalidOperationException("สาขาหรือเลขเครื่องขายไม่ตรงกับเครื่องที่แอดมินกำหนด");
+        }
         private static string Value(Dictionary<string, string> source, string key, string fallback = "") => source.ContainsKey(key) ? source[key] : fallback;
 
         internal static SqlConnectionStringBuilder ConnectionString(Connection settings, string server)
@@ -204,7 +220,7 @@ namespace SCCRMonPOS
 
         private static void CheckEnvironment(Connection value)
         {
-            foreach (var pair in new Dictionary<string, string> { { "AdaPosEnabled", "true" }, { "AdaPosDbServer", value.Server }, { "AdaPosDbName", value.Database }, { "AdaPosDbUser", value.User }, { "AdaPosDbPassword", value.Password } })
+            foreach (var pair in new Dictionary<string, string> { { "AdaPosEnabled", "true" }, { "AdaPosDbServer", value.Server }, { "AdaPosDbName", value.Database }, { "AdaPosDbUser", value.User }, { "AdaPosDbPassword", value.Password }, { "AdaPosBranchCode", value.Branch }, { "AdaPosCode", value.Pos } })
             {
                 string current = Environment.GetEnvironmentVariable("SCCRMONPOS__" + pair.Key);
                 if (!string.IsNullOrWhiteSpace(current) && current != pair.Value) throw new InvalidOperationException("มีค่าการเชื่อมต่อจาก environment ที่ทับค่าตัวติดตั้ง กรุณาให้ผู้ดูแลตรวจการตั้งค่าเดิมก่อน");
@@ -270,7 +286,7 @@ namespace SCCRMonPOS
 
         internal static void Apply(string directory, Connection settings, Action afterSecrets = null)
         {
-            EnsureStopped(); CheckEnvironment(settings);
+            EnsureStopped(); RequireTerminal(settings); CheckEnvironment(settings);
             directory = Path.GetFullPath(directory);
             if (directory.StartsWith(@"\\") || directory.TrimEnd('\\') == Path.GetPathRoot(directory).TrimEnd('\\')) throw new InvalidOperationException("กรุณาติดตั้งในโฟลเดอร์บนเครื่องนี้");
             foreach (string candidate in new[] { directory, Path.Combine(directory, "data"), Path.Combine(directory, "data", "configuration-backups"), Path.Combine(directory, "SCCRMonPOS.exe.config"), Path.Combine(directory, "SCCRMonPOS.secrets.config") })
@@ -281,8 +297,9 @@ namespace SCCRMonPOS
             if (oldConfig == null) { Set(config, "ApiBaseUrl", "https://sc-official-website.onrender.com"); Set(config, "BahtPerPoint", "25"); }
             Set(config, "AdaPosEnabled", "true"); Set(config, "AdaPosDbServer", settings.Server); Set(config, "AdaPosDbName", settings.Database);
             Set(config, "AdaPosPollMs", "3000"); Set(config, "WatcherDiagnosticsEnabled", "true");
+            Set(config, "AdaPosBranchCode", settings.Branch); Set(config, "AdaPosCode", settings.Pos);
             // Secret overrides for these settings must agree with public config.
-            foreach (string key in new[] { "AdaPosEnabled", "AdaPosDbServer", "AdaPosDbName", "AdaPosPollMs", "WatcherDiagnosticsEnabled" })
+            foreach (string key in new[] { "AdaPosEnabled", "AdaPosDbServer", "AdaPosDbName", "AdaPosPollMs", "WatcherDiagnosticsEnabled", "AdaPosBranchCode", "AdaPosCode" })
                 foreach (XmlNode node in secrets.SelectNodes("/configuration/appSettings/add[@key='" + key + "']")) node.ParentNode.RemoveChild(node);
             Set(secrets, "AdaPosDbUser", settings.User); Set(secrets, "AdaPosDbPassword", settings.Password);
             string backup = Path.Combine(directory, "data", "configuration-backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N"));
@@ -314,28 +331,32 @@ namespace SCCRMonPOS
 
         private sealed class ConnectionForm : Form
         {
-            private readonly TextBox server, database, user, password;
+            private readonly TextBox server, database, user, password, branch, pos;
             private readonly Label status;
             private readonly Button connect;
             private bool working;
             internal ConnectionForm(string directory, Connection value, string failure)
             {
-                Text = "SCCRM — เชื่อมต่อ AdaPos"; Size = new Size(570, 420); FormBorderStyle = FormBorderStyle.FixedDialog;
+                ApplyApprovedTerminal(value);
+                Text = "SCCRM — เชื่อมต่อ AdaPos"; Size = new Size(570, 510); FormBorderStyle = FormBorderStyle.FixedDialog;
                 MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen; Font = new Font("Segoe UI", 10);
                 var header = new Label { Text = "เชื่อม AdaPos เพื่ออ่านบิลสมาชิก", Left = 22, Top = 18, Width = 520, Height = 34, ForeColor = Color.FromArgb(11, 31, 184), Font = new Font(Font, FontStyle.Bold) }; Controls.Add(header);
                 server = Field("เซิร์ฟเวอร์", value.Server, 60); database = Field("ฐานข้อมูล", value.Database, 105);
                 user = Field("บัญชีอ่านอย่างเดียว", value.User, 150); password = Field("รหัสผ่านฐานข้อมูล", value.Password, 195); password.UseSystemPasswordChar = true;
-                status = new Label { Text = failure, Left = 22, Top = 245, Width = 510, Height = 64 }; Controls.Add(status);
-                connect = new Button { Text = "ตรวจการเชื่อมต่อและติดตั้ง", Left = 245, Top = 320, Width = 285, Height = 38 }; Controls.Add(connect);
-                var cancel = new Button { Text = "ยกเลิก", Left = 22, Top = 320, Width = 100, Height = 38, DialogResult = DialogResult.Cancel }; Controls.Add(cancel);
+                branch = Field("รหัสสาขา (เช่น 001)", value.Branch, 240); pos = Field("เลขเครื่องขาย (เช่น 002)", value.Pos, 285);
+                branch.MaxLength = 3; pos.MaxLength = 3;
+                branch.ReadOnly = pos.ReadOnly = !string.IsNullOrEmpty(DeviceAccessGuard.CurrentDevice?.ReceiptPosCode);
+                status = new Label { Text = failure, Left = 22, Top = 335, Width = 510, Height = 64 }; Controls.Add(status);
+                connect = new Button { Text = "ตรวจการเชื่อมต่อและติดตั้ง", Left = 245, Top = 410, Width = 285, Height = 38 }; Controls.Add(connect);
+                var cancel = new Button { Text = "ยกเลิก", Left = 22, Top = 410, Width = 100, Height = 38, DialogResult = DialogResult.Cancel }; Controls.Add(cancel);
                 CancelButton = cancel;
                 FormClosing += (s, e) => { if (working) e.Cancel = true; };
                 connect.Click += async (s, e) =>
                 {
                     working = true; connect.Enabled = false; cancel.Enabled = false; status.Text = "กำลังตรวจบัญชีอ่านอย่างเดียวและโครงสร้างบิล…";
-                    var input = new Connection { Server = server.Text.Trim(), Database = database.Text.Trim(), User = user.Text.Trim(), Password = password.Text };
+                    var input = new Connection { Server = server.Text.Trim(), Database = database.Text.Trim(), User = user.Text.Trim(), Password = password.Text, Branch = branch.Text.Trim(), Pos = pos.Text.Trim() };
                     Action<string> progress = text => BeginInvoke((Action)(() => { if (working && !IsDisposed) status.Text = text; }));
-                    try { await Task.Run(() => { EnsureStopped(); VerifyConnectionWithProgress(input, progress); progress("กำลังบันทึกค่าการเชื่อมต่อ…"); Apply(directory, input); }); working = false; DialogResult = DialogResult.OK; Close(); }
+                    try { await Task.Run(() => { EnsureStopped(); RequireTerminal(input); VerifyConnectionWithProgress(input, progress); progress("กำลังบันทึกค่าการเชื่อมต่อ…"); Apply(directory, input); }); working = false; DialogResult = DialogResult.OK; Close(); }
                     catch (Exception error) { status.Text = SafeError(error); }
                     finally { working = false; connect.Enabled = true; cancel.Enabled = true; }
                 };

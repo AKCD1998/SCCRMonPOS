@@ -58,7 +58,7 @@ namespace SCCRMonPOS
             _api                      = new ApiClient(baseUrl);
             _api.SetPosApiKey(AppSettingsProvider.Get("PosApiKey", ""));
             _auth                     = new StaffAuthManager(_dataFolder);
-            _watermarkStore           = new ReceiptWatermarkStore(_dataFolder);
+            _watermarkStore           = new ReceiptWatermarkStore(_dataFolder, ReceiptTerminalScope.FromConfiguration());
             _watcherDiagnosticsEnabled = ReadBool("WatcherDiagnosticsEnabled", true);
             _bahtPerPoint             = ReadInt("BahtPerPoint", 10);
             _internalApiToken         = AppSettingsProvider.Get("SccrmInternalApiToken", "");
@@ -213,6 +213,7 @@ namespace SCCRMonPOS
         // Called from the watcher background thread — cache only, no auto-popup.
         private void OnReceiptCompleted(object sender, PosReceipt receipt)
         {
+            if (_watcher == null || !_watcher.OwnsReceipt(receipt)) return;
             LogRuntime(
                 "Receipt detected: doc=" + (receipt?.DocNo ?? "-") +
                 ", branch=" + (receipt?.BranchCode ?? "-") +
@@ -226,6 +227,7 @@ namespace SCCRMonPOS
 
         private void OnReturnDetected(object sender, PosReceipt receipt)
         {
+            if (_watcher == null || !_watcher.OwnsReceipt(receipt)) return;
             LogRuntime(
                 "Return detected: doc=" + (receipt?.DocNo ?? "-") +
                 ", original=" + (receipt?.OriginalDocNo ?? "-") +
@@ -294,7 +296,7 @@ namespace SCCRMonPOS
             ScheduleOnUiThread(() =>
             {
                 if (_miWatcherStatus != null)
-                    _miWatcherStatus.Text = "AdaPos DB: เชื่อมต่อแล้ว ✓";
+                    _miWatcherStatus.Text = "AdaPos DB: " + _watcher.TerminalDescription + " ✓";
             });
         }
 
@@ -305,7 +307,7 @@ namespace SCCRMonPOS
             ScheduleOnUiThread(() =>
             {
                 if (_miWatcherStatus != null)
-                    _miWatcherStatus.Text = "AdaPos DB: ขาดการเชื่อมต่อ ⚠";
+                    _miWatcherStatus.Text = "AdaPos DB: " + errorMessage;
             });
         }
 

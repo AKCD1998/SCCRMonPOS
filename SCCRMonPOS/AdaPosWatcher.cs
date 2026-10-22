@@ -47,6 +47,7 @@ namespace SCCRMonPOS
         private readonly string _password;
         private readonly int    _pollMs;
         private readonly bool   _enabled;
+        private readonly ReceiptTerminalScope _terminal;
 
         // ── State ─────────────────────────────────────────────────────────────
 
@@ -74,7 +75,11 @@ namespace SCCRMonPOS
         // ─────────────────────────────────────────────────────────────────────
 
         public AdaPosWatcher(ReceiptWatermark initialWatermark, bool diagnosticsEnabled)
+            : this(initialWatermark, diagnosticsEnabled, ReceiptTerminalScope.FromConfiguration()) { }
+
+        internal AdaPosWatcher(ReceiptWatermark initialWatermark, bool diagnosticsEnabled, ReceiptTerminalScope terminal)
         {
+            _terminal = terminal;
             _enabled = ReadBool("AdaPosEnabled", true);
 
             _configuredServer = Cfg("AdaPosDbServer",   "192.168.0.127,49683");
@@ -89,10 +94,17 @@ namespace SCCRMonPOS
         // ── Public API ────────────────────────────────────────────────────────
 
         public bool IsEnabled { get { return _enabled; } }
+        public string TerminalDescription => _terminal?.Description ?? "ยังไม่กำหนดสาขา / เครื่องขาย";
+        public bool OwnsReceipt(PosReceipt receipt) => _terminal != null && _terminal.Contains(receipt);
 
         public void Start()
         {
             if (!_enabled || _thread != null) return;
+            if (_terminal == null)
+            {
+                WatcherDisconnected?.Invoke(this, "ยังไม่ผูกสาขาและเลขเครื่องขายกับเครื่องนี้ กรุณาให้แอดมินตั้งค่าก่อนอ่านบิล");
+                return;
+            }
 
             // Watermark starts at this moment — historical receipts are ignored
             _running = true;
@@ -114,6 +126,7 @@ namespace SCCRMonPOS
 
         public void AcknowledgeReceipt(PosReceipt receipt)
         {
+            if (!OwnsReceipt(receipt)) return;
             ReceiptWatermark next = ReceiptWatermark.FromReceipt(receipt);
             if (next != null && IsAfterWatermark(next, _watermark))
                 _watermark = next;
@@ -135,7 +148,7 @@ namespace SCCRMonPOS
         /// </summary>
         public PosReceipt LoadReceiptByDocNo(string docNo)
         {
-            if (string.IsNullOrWhiteSpace(docNo)) return null;
+            if (_terminal == null || string.IsNullOrWhiteSpace(docNo)) return null;
             try
             {
                 string connStr = ResolveConnectionString();
@@ -160,10 +173,13 @@ namespace SCCRMonPOS
                            h.FCShdGrand, h.FCShdDis, h.FCShdMnyCsh, h.FCShdChn,
                            h.FTShdStaRefund, h.FTShdPosCN
                     FROM   " + set.HeaderTable + @" h
-                    WHERE  h.FTShdDocNo = @docNo";
+                    WHERE  h.FTShdDocNo = @docNo
+                       AND h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos
+                       AND h.FTShdStaPaid = '3'";
 
                 using (var cmd = new SqlCommand(sql, conn))
                 {
+                    _terminal.AddParameters(cmd);
                     cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = docNo;
                     using (var r = cmd.ExecuteReader())
                     {
@@ -206,7 +222,7 @@ namespace SCCRMonPOS
         /// </summary>
         public bool TryRefetchLineItems(PosReceipt receipt)
         {
-            if (receipt == null) return false;
+            if (!OwnsReceipt(receipt)) return false;
             try
             {
                 string connStr = ResolveConnectionString();
@@ -261,6 +277,7 @@ namespace SCCRMonPOS
 
         private void PollOnce()
         {
+            if (_terminal == null) throw new InvalidOperationException("ยังไม่กำหนดเครื่องขายสำหรับอ่านบิล");
             using (var conn = new SqlConnection(ResolveConnectionString()))
             {
                 conn.Open();
@@ -277,6 +294,7 @@ namespace SCCRMonPOS
 
                 foreach (PosReceipt receipt in receipts)
                 {
+                    if (!OwnsReceipt(receipt)) continue;
                     if (receipt.IsReturn)
                     {
                         if (!string.IsNullOrWhiteSpace(receipt.OriginalDocNo))
@@ -599,7 +617,9 @@ namespace SCCRMonPOS
             if (_saleTableSets != null && _saleTableSets.Count > 0)
                 return;
 
+            if (_terminal == null) throw new InvalidOperationException("ยังไม่กำหนดเครื่องขายสำหรับอ่านบิล");
             _saleTableSets = DiscoverSaleTableSets(conn);
+            _saleTableSets.RemoveAll(set => !string.IsNullOrEmpty(set.PosCode) && set.PosCode != _terminal.PosCode);
             RaiseDiagnostic("Sale tables: " + DescribeTableSets(_saleTableSets));
         }
 
@@ -703,7 +723,9 @@ namespace SCCRMonPOS
                        h.FCShdGrand,    h.FCShdDis,
                        h.FCShdMnyCsh,   h.FCShdChn,
                        h.FTShdStaRefund, h.FTShdPosCN
-                FROM   " + set.HeaderTable + @" h");
+                FROM   " + set.HeaderTable + @" h
+                WHERE h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos
+                  AND h.FTShdStaPaid = '3'");
             }
 
             string sql = @"
@@ -719,6 +741,7 @@ namespace SCCRMonPOS
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@ld", SqlDbType.DateTime).Value   = _watermark.InsertDate;
                 cmd.Parameters.Add("@lt", SqlDbType.VarChar, 8).Value = _watermark.InsertTime ?? "";
                 cmd.Parameters.Add("@doc", SqlDbType.VarChar, 50).Value = _watermark.DocNo ?? "";
@@ -758,15 +781,17 @@ namespace SCCRMonPOS
 
         // ── SQL: refresh mutable header fields for a pending receipt ─────────
 
-        private static void RefreshReceiptHeader(SqlConnection conn, PosReceipt receipt)
+        private void RefreshReceiptHeader(SqlConnection conn, PosReceipt receipt)
         {
+            _terminal.Require(receipt);
             string sql = @"
                 SELECT FCShdGrand, FCShdDis, FCShdMnyCsh, FCShdChn
                 FROM   " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @"
-                WHERE  FTShdDocNo = @docNo";
+                WHERE  FTShdDocNo = @docNo AND FTBchCode = @receiptBranch AND FTPosCode = @receiptPos";
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
                 {
@@ -783,15 +808,17 @@ namespace SCCRMonPOS
 
         // ── SQL: refresh original-bill ref for a pending return ───────────────
 
-        private static void RefreshReturnHeader(SqlConnection conn, PosReceipt receipt)
+        private void RefreshReturnHeader(SqlConnection conn, PosReceipt receipt)
         {
+            _terminal.Require(receipt);
             string sql = @"
                 SELECT FCShdGrand, FTShdPosCN
                 FROM   " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @"
-                WHERE  FTShdDocNo = @docNo";
+                WHERE  FTShdDocNo = @docNo AND FTBchCode = @receiptBranch AND FTPosCode = @receiptPos";
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
                 {
@@ -806,8 +833,9 @@ namespace SCCRMonPOS
 
         // ── SQL: line items for one receipt ───────────────────────────────────
 
-        private static void FetchLineItems(SqlConnection conn, PosReceipt receipt)
+        private void FetchLineItems(SqlConnection conn, PosReceipt receipt)
         {
+            _terminal.Require(receipt);
             string sql = @"
                 SELECT d.FNSdtSeqNo,   d.FTPdtCode,    d.FTPdtName,
                        d.FTSdtBarCode, d.FCSdtQty,     d.FCSdtSetPrice,
@@ -815,10 +843,14 @@ namespace SCCRMonPOS
                        d.FTPunCode,    d.FTSdtUnitName
                 FROM   " + GetSafeTableName(receipt.DetailTable, "TPSTSalDT") + @" d
                 WHERE  d.FTShdDocNo = @docNo
+                  AND d.FTBchCode = @receiptBranch
+                  AND EXISTS (SELECT 1 FROM " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @" h
+                      WHERE h.FTShdDocNo = d.FTShdDocNo AND h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos)
                 ORDER BY d.FNSdtSeqNo";
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
                 {
@@ -845,16 +877,20 @@ namespace SCCRMonPOS
 
         // ── SQL: primary payment method for one receipt ────────────────────────
 
-        private static void FetchPayment(SqlConnection conn, PosReceipt receipt)
+        private void FetchPayment(SqlConnection conn, PosReceipt receipt)
         {
+            _terminal.Require(receipt);
             string sql = @"
-                SELECT TOP 1 FTRcvCode, FTRcvName, FTSrcRef
-                FROM   " + GetSafeTableName(receipt.PaymentTable, "TPSTSalRC") + @"
-                WHERE  FTShdDocNo = @docNo
-                ORDER BY FNSrcSeqNo";
+                SELECT TOP 1 p.FTRcvCode, p.FTRcvName, p.FTSrcRef
+                FROM   " + GetSafeTableName(receipt.PaymentTable, "TPSTSalRC") + @" p
+                WHERE  p.FTShdDocNo = @docNo
+                  AND EXISTS (SELECT 1 FROM " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @" h
+                      WHERE h.FTShdDocNo = p.FTShdDocNo AND h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos)
+                ORDER BY p.FNSrcSeqNo";
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
                 {

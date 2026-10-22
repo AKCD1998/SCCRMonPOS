@@ -17,6 +17,8 @@
       "hostname": "SC_001",
       "ipv4": "100.81.137.41",
       "status": "approved",
+      "receiptBranchCode": "001",
+      "receiptPosCode": "001",
       "adaPaths": [
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
@@ -27,6 +29,8 @@
       "hostname": "POSSRV",
       "ipv4": "100.106.107.80",
       "status": "approved",
+      "receiptBranchCode": "005",
+      "receiptPosCode": "001",
       "adaPaths": [
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
@@ -57,6 +61,8 @@
       "hostname": "POS2",
       "ipv4": "100.93.254.58",
       "status": "approved",
+      "receiptBranchCode": "001",
+      "receiptPosCode": "002",
       "adaPaths": [
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"

@@ -35,7 +35,7 @@ internal static class AdaPosSetupCheck
             Check(args.Length == 0, "supported test mode");
             var parsed = AdaPosSetup.ParseAgent("ADAPOS_SQLSERVER_USER=reader\nADAPOS_SQLSERVER_PASSWORD='special;=<&\"'\nADAPOS_SQLSERVER_ADMIN_PASSWORD=never-import\nADAPOS_SYNC_TOKEN=never-import\nADAPOS_SYNC_BRANCH_CODE=005\n");
             Check(parsed.Count == 3 && parsed["ADAPOS_SQLSERVER_PASSWORD"] == "special;=<&\"", "import allowlist and literal password");
-            var inputSettings = new AdaPosSetup.Connection { User = "fixture-reader", Password = "fixture;Password=bad;\"<>&'" };
+            var inputSettings = new AdaPosSetup.Connection { User = "fixture-reader", Password = "fixture;Password=bad;\"<>&'", Branch = "901", Pos = "001" };
             var builder = AdaPosSetup.ConnectionString(inputSettings, @".\SQLEXPRESS");
             Check(builder.Password == inputSettings.Password && builder.UserID == inputSettings.User && !builder.IntegratedSecurity, "connection-string escaping");
             Check(builder.ConnectTimeout > 4 && builder.ConnectTimeout <= 30, "bounded connection budget tolerates slow pre-login");
@@ -52,6 +52,8 @@ internal static class AdaPosSetupCheck
             File.WriteAllText(session, "fixture-session-must-not-change");
             AdaPosSetup.Apply(directory, inputSettings);
             Check(Value(config, "AdaPosEnabled") == "true", "watcher enabled");
+            Check(Value(config, "AdaPosBranchCode") == "901" && Value(config, "AdaPosCode") == "001", "branch and register persisted");
+            Reject(() => AdaPosSetup.Apply(directory, new AdaPosSetup.Connection { User = "fixture", Password = "fixture" }), "missing register cannot be applied");
             Check(Value(config, "ApiBaseUrl") == "https://fixture.invalid" && Value(config, "OtherSetting") == "keep" && File.ReadAllText(config).Contains("<!--keep-->"), "existing settings preserved");
             Check(Value(secret, "PosApiKey") == "fixture-only" && Value(secret, "AdaPosEnabled") == null, "unrelated secrets preserved and override removed");
             Check(Value(secret, "AdaPosDbPassword") == inputSettings.Password, "secret XML escaping");
@@ -63,7 +65,7 @@ internal static class AdaPosSetupCheck
             AdaPosSetup.Apply(directory, inputSettings);
             Check(File.ReadAllText(session) == "fixture-session-must-not-change", "repeat setup preserves staff session");
             byte[] beforeConfig = File.ReadAllBytes(config), beforeSecret = File.ReadAllBytes(secret);
-            Reject(() => AdaPosSetup.Apply(directory, new AdaPosSetup.Connection { User = "changed-fixture", Password = "changed-fixture" }, () => { throw new IOException("injected failure"); }), "injected write failure");
+            Reject(() => AdaPosSetup.Apply(directory, new AdaPosSetup.Connection { User = "changed-fixture", Password = "changed-fixture", Branch = "901", Pos = "001" }, () => { throw new IOException("injected failure"); }), "injected write failure");
             Check(beforeConfig.SequenceEqual(File.ReadAllBytes(config)) && beforeSecret.SequenceEqual(File.ReadAllBytes(secret)), "atomic rollback restores exact files");
             Check(!Directory.GetFiles(directory, "*.prepared-*").Any(), "prepared files removed");
             Check(Directory.GetFiles(Path.Combine(directory, "data", "configuration-backups"), "SCCRMonPOS.secrets.config", SearchOption.AllDirectories).Length >= 3, "existing credentials backed up");

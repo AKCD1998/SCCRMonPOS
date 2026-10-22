@@ -28,6 +28,8 @@ namespace SCCRMonPOS
         [DataMember(Name = "ipv4")] public string Ipv4;
         [DataMember(Name = "status")] public string Status;
         [DataMember(Name = "adaPaths")] public string[] AdaPaths;
+        [DataMember(Name = "receiptBranchCode")] public string ReceiptBranchCode;
+        [DataMember(Name = "receiptPosCode")] public string ReceiptPosCode;
     }
 
     [DataContract]
@@ -51,6 +53,7 @@ namespace SCCRMonPOS
     public static class DeviceAccessGuard
     {
         public const int ApprovedCheckExitCode = 42;
+        public static ApprovedDevice CurrentDevice { get; private set; }
         public static string Evaluate(DevicePolicy policy, TailnetIdentity identity,
             Func<string, bool> hasLocalAddress, Func<string, bool> hasAdaExecutable)
         {
@@ -122,7 +125,9 @@ namespace SCCRMonPOS
                     }
                     if (process.ExitCode != 0 || !stdout.Wait(1000)) throw new InvalidDataException("Tailscale is unavailable.");
                     var identity = Parse<TailnetIdentity>(stdout.Result);
-                    error = Evaluate(LoadPolicy(), identity, HasLocalAddress, HasAdaExecutable);
+                    var policy = LoadPolicy();
+                    error = Evaluate(policy, identity, HasLocalAddress, HasAdaExecutable);
+                    if (error == null) CurrentDevice = policy.Devices.Single(d => d.NodeId == identity.Self.Id);
                     return error == null;
                 }
             }

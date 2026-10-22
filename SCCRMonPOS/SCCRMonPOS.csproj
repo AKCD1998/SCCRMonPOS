@@ -92,6 +92,7 @@
     </Compile>
     <Compile Include="ScannerInputService.cs" />
     <Compile Include="ReceiptWorkflowStore.cs" />
+    <Compile Include="ReceiptTerminalScope.cs" />
     <Compile Include="TrayAppContext.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="DeviceAccessGuard.cs" />
