@@ -58,6 +58,7 @@ namespace SCCRMonPOS
             _customerDisplay = customerDisplay ?? new CustomerDisplayController(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
 
             InitializeComponent();
+            Text += " — " + (_watcher?.TerminalDescription ?? "ยังไม่กำหนดเครื่องขาย");
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
@@ -166,6 +167,14 @@ namespace SCCRMonPOS
 
         private void LoadReceipt(PosReceipt receipt)
         {
+            if (_watcher == null || !_watcher.OwnsReceipt(receipt))
+            {
+                _receipt = null;
+                PopulateItemsList(null);
+                SetStatus("บิลไม่ตรงกับสาขา / เครื่องขายนี้ จึงไม่สามารถเลือกบิลได้", true);
+                UpdateConfirmButton();
+                return;
+            }
             _receipt = receipt;
             _centralQuotePoints = null;
             _txtReceiptNo.Text = receipt.DocNo ?? "";
@@ -216,7 +225,7 @@ namespace SCCRMonPOS
 
             if (receipt == null)
             {
-                SetStatus("ไม่พบบิลนี้ กรุณาตรวจสอบเลขที่ใบเสร็จอีกครั้ง", true);
+                SetStatus("ไม่พบบิลของเครื่องขายนี้ กรุณาตรวจเลขบิลและเครื่องที่ออกบิล", true);
                 _receipt = null;
                 _lvItems.Items.Clear();
                 _lblTotal.Text = "ยอดรวม: -";
@@ -604,6 +613,8 @@ namespace SCCRMonPOS
 
         private LoyaltyClaimRequest BuildClaimRequest()
         {
+            if (_watcher == null || !_watcher.OwnsReceipt(_receipt))
+                throw new InvalidOperationException("บิลไม่ตรงกับสาขา / เครื่องขายนี้ จึงบันทึกให้สมาชิกไม่ได้");
             LoyaltyClaimItem[] items = new LoyaltyClaimItem[_receipt.Items != null ? _receipt.Items.Count : 0];
             if (_receipt.Items != null)
             {
@@ -688,6 +699,7 @@ namespace SCCRMonPOS
         private bool CanConfirm()
         {
             return !_uiBusy && !_claimCompleted && _receipt != null && !_receipt.IsReturn && _receipt.DocType != "9" &&
+                _watcher != null && _watcher.OwnsReceipt(_receipt) &&
                 !string.IsNullOrWhiteSpace(_receipt.DocNo) && !string.IsNullOrWhiteSpace(_receipt.BranchCode) &&
                 _receipt.GrandTotal > 0m && _receipt.Items != null && _receipt.Items.Count > 0 &&
                 _selectedMember != null && _selectedMember.PointsAvailable;

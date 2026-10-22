@@ -40,10 +40,11 @@ namespace SCCRMonPOS
     {
         private readonly string _filePath;
 
-        public ReceiptWatermarkStore(string dataFolder)
+        public ReceiptWatermarkStore(string dataFolder) : this(dataFolder, null) { }
+        internal ReceiptWatermarkStore(string dataFolder, ReceiptTerminalScope terminal)
         {
             Directory.CreateDirectory(dataFolder);
-            _filePath = Path.Combine(dataFolder, "receipt-watermark.json");
+            _filePath = Path.Combine(dataFolder, terminal == null ? "receipt-watermark.json" : "receipt-watermark-" + terminal.FileKey + ".json");
         }
 
         public ReceiptWatermark Load()

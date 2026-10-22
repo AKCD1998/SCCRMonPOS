@@ -58,7 +58,8 @@ internal static class PurchaseHistoryCheck
     {
         stage="select-member-and-confirm-"+suffix;
         using(var display=new CustomerDisplayController(Path.Combine(input.OutputDirectory,"synthetic-display")))
-        using(var form=new MemberClaimForm(api,null,25,"synthetic-history-test",Receipt(input,suffix,drugOnly),display))
+        using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope(input.BranchCode,"TEST-POS")))
+        using(var form=new MemberClaimForm(api,watcher,25,"synthetic-history-test",Receipt(input,suffix,drugOnly),display))
         {
             ShowOffscreen(form);
             Field<TextBox>(form,"_txtMemberSearch").Text=phone;
@@ -123,7 +124,8 @@ internal static class PurchaseHistoryCheck
         stage="offline-zero-points-and-return-guard";
         var input=new Input {BranchCode="TEST_FIXTURE",ReceiptPrefix="HISTORYTEST-"};
         using(var display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-history-offline")))
-        using(var form=new MemberClaimForm(new ApiClient("http://127.0.0.1:1"),null,25,"synthetic",Receipt(input,"ZERO",true),display))
+        using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope(input.BranchCode,"TEST-POS")))
+        using(var form=new MemberClaimForm(new ApiClient("http://127.0.0.1:1"),watcher,25,"synthetic",Receipt(input,"ZERO",true),display))
         {
             Call(form,"AddMemberRow",new MemberSearchResult { Id="synthetic",DisplayName="Synthetic",PointsAvailable=true });
             Call(form,"SelectMemberAtRow",0);
