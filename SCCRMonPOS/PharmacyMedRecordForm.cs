@@ -78,7 +78,7 @@ namespace SCCRMonPOS
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
-            TopMost         = true;
+            TopMost         = false;
             StartPosition   = FormStartPosition.CenterParent;
             ShowInTaskbar   = false;
             BackColor       = Color.White;

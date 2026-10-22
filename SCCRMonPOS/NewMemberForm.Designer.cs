@@ -201,7 +201,7 @@ namespace SCCRMonPOS
             this.ShowInTaskbar   = false;
             this.StartPosition   = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text            = "SCCRM — เพิ่มสมาชิกใหม่";
-            this.TopMost         = true;
+            this.TopMost         = false;
             this.ResumeLayout(false);
         }
 

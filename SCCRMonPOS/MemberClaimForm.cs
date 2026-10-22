@@ -513,7 +513,7 @@ namespace SCCRMonPOS
             form.ShowDialog(this);
         }
 
-        private static bool PromptPin(string prompt, string requiredPin)
+        private bool PromptPin(string prompt, string requiredPin)
         {
             DialogResult result = DialogResult.None;
 
@@ -524,7 +524,7 @@ namespace SCCRMonPOS
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                TopMost = true,
+                TopMost = false,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false,
                 BackColor = Color.White
@@ -558,13 +558,15 @@ namespace SCCRMonPOS
             dlg.CancelButton = btnCancel;
             dlg.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
 
-            result = dlg.ShowDialog();
+            // Owned by SCCRM only; it must not stay above AdaPos or other apps.
+            result = dlg.ShowDialog(this);
             bool ok = result == DialogResult.OK && txt.Text == requiredPin;
             dlg.Dispose();
 
             if (!ok && result == DialogResult.OK)
             {
                 MessageBox.Show(
+                    this,
                     "รหัสผ่านไม่ถูกต้อง",
                     "SCCRM",
                     MessageBoxButtons.OK,

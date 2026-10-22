@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -52,6 +53,7 @@ internal static class DesktopFeatureCheck
                 }
                 RenderPreviews();
                 MemberSelection();
+                CashierWindowSwitching();
             }
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + ",\"stage\":\"" + stage + "\"}"); return 0;
         }
@@ -236,6 +238,82 @@ internal static class DesktopFeatureCheck
             var selected = (MemberSearchResult)typeof(MemberClaimForm).GetField("_selectedMember",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
             Check(selected != null && !selected.PointsAvailable);
             Check(!(bool)typeof(MemberClaimForm).GetMethod("CanConfirm",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null));
+        }
+    }
+
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+
+    // Use real offscreen HWNDs on a deliberately blocked UI thread. A normal
+    // window on another UI thread must cover the cashier and its owned dialogs
+    // without asking the blocked thread to process an activation/close message.
+    private static void CashierWindowSwitching()
+    {
+        stage = "blocked-cashier-does-not-cover-other-apps";
+        using (var ready = new ManualResetEvent(false))
+        using (var release = new ManualResetEvent(false))
+        {
+            IntPtr[] windows = null;
+            Exception error = null;
+            bool mainCanMinimize = false;
+            var worker = new Thread(() =>
+            {
+                try
+                {
+                    using (var main = new MemberClaimForm())
+                    using (var login = new StaffLoginForm())
+                    using (var create = new NewMemberForm(new ApiClient("http://127.0.0.1:1")))
+                    using (var edit = new NewMemberForm(new ApiClient("http://127.0.0.1:1"), new MemberDetail { Id = "synthetic" }))
+                    using (var medical = new PharmacyMedRecordForm("synthetic"))
+                    {
+                        create.Owner = main; edit.Owner = main; medical.Owner = create;
+                        var forms = new Form[] { main, login, create, edit, medical };
+                        windows = forms.Select(form => {
+                            form.StartPosition = FormStartPosition.Manual;
+                            form.Location = new Point(-12000, -12000);
+                            ShowWindow(form.Handle, 4); // SW_SHOWNOACTIVATE
+                            return form.Handle;
+                        }).ToArray();
+                        mainCanMinimize = main.ShowInTaskbar && main.MinimizeBox;
+                        main.WindowState = FormWindowState.Minimized;
+                        mainCanMinimize &= IsIconic(main.Handle);
+                        main.WindowState = FormWindowState.Normal;
+                        ready.Set();
+                        if (!release.WaitOne(15000)) throw new TimeoutException("Cashier test was not released.");
+                    }
+                }
+                catch (Exception ex) { error = ex; ready.Set(); }
+            }) { IsBackground = true };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+            try
+            {
+                Check(ready.WaitOne(10000));
+                if (error != null) throw error;
+                Check(mainCanMinimize);
+                using (var otherApp = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-12000,-12000) })
+                {
+                    ShowWindow(otherApp.Handle, 4);
+                    Check(SetWindowPos(otherApp.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x13)); // TOP, NOACTIVATE/NOMOVE/NOSIZE
+                    foreach (var window in windows)
+                    {
+                        Check((GetWindowLong(window, -20) & 0x8) == 0); // no WS_EX_TOPMOST
+                        bool covered = false;
+                        var previous = window;
+                        for (int i = 0; i < 1000 && previous != IntPtr.Zero; i++)
+                        {
+                            previous = GetWindow(previous, 3); // GW_HWNDPREV
+                            if (previous == otherApp.Handle) { covered = true; break; }
+                        }
+                        Check(covered);
+                    }
+                }
+            }
+            finally { release.Set(); worker.Join(10000); }
+            if (error != null) throw error;
         }
     }
 }

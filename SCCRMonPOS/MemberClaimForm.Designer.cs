@@ -576,10 +576,10 @@ namespace SCCRMonPOS
             this.Font = new System.Drawing.Font("Tahoma", 8.75F);
             this.MinimumSize = new System.Drawing.Size(532, 560);
             this.Name = "MemberClaimForm";
-            this.ShowInTaskbar = false;
+            this.ShowInTaskbar = true;
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "SCCRM - สะสมแต้ม";
-            this.TopMost = true;
+            this.TopMost = false;
             this.Load += new System.EventHandler(this.MemberClaimForm_Load);
             this._navPanel.ResumeLayout(false);
             this._itemsHost.ResumeLayout(false);
