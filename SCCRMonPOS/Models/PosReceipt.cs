@@ -43,6 +43,8 @@ namespace SCCRMonPOS.Models
         [DataMember] public string ProductCode { get; set; }
         [DataMember] public string ProductName { get; set; }
         [DataMember] public string Barcode { get; set; }
+        [DataMember] public string UnitCode { get; set; }
+        [DataMember] public string UnitName { get; set; }
         [DataMember] public decimal Qty { get; set; }
         [DataMember] public decimal UnitPrice { get; set; }
         [DataMember] public decimal NetAmount { get; set; }

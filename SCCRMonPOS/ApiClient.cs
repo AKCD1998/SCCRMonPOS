@@ -63,6 +63,8 @@ namespace SCCRMonPOS
         public string Barcode { get; set; }
         public decimal? LineDiscount { get; set; }
         public string PromotionCode { get; set; }
+        public string UnitCode { get; set; }
+        public string UnitName { get; set; }
         public string  ProductCode { get; set; }
         public string  ProductName { get; set; }
         public decimal Qty         { get; set; }
@@ -136,6 +138,8 @@ namespace SCCRMonPOS
         public string Barcode { get; set; }
         public decimal? LineDiscount { get; set; }
         public string PromotionCode { get; set; }
+        public string UnitCode { get; set; }
+        public string UnitName { get; set; }
         public string  ProductCode { get; set; }
         public string  ProductName { get; set; }
         public decimal Qty         { get; set; }
@@ -559,6 +563,8 @@ namespace SCCRMonPOS
             [DataMember(Name = "barcode")] public string Barcode { get; set; }
             [DataMember(Name = "lineDiscount")] public decimal? LineDiscount { get; set; }
             [DataMember(Name = "promotionCode")] public string PromotionCode { get; set; }
+            [DataMember(Name = "unitCode")] public string UnitCode { get; set; }
+            [DataMember(Name = "unitName")] public string UnitName { get; set; }
             [DataMember(Name = "productCode")] public string  ProductCode { get; set; }
             [DataMember(Name = "productName")] public string  ProductName { get; set; }
             [DataMember(Name = "qty")]         public decimal Qty         { get; set; }
@@ -596,6 +602,8 @@ namespace SCCRMonPOS
                         Barcode = items[j].Barcode,
                         LineDiscount = items[j].LineDiscount,
                         PromotionCode = items[j].PromotionCode,
+                        UnitCode = items[j].UnitCode,
+                        UnitName = items[j].UnitName,
                         ProductCode = items[j].ProductCode,
                         ProductName = items[j].ProductName,
                         Qty         = items[j].Qty,
@@ -1039,6 +1047,8 @@ namespace SCCRMonPOS
                     sb.Append("\"seq\":").Append(item.Seq).Append(',');
                     sb.Append("\"barcode\":").Append(JsonStr(item.Barcode)).Append(',');
                     sb.Append("\"promotionCode\":").Append(JsonStr(item.PromotionCode)).Append(',');
+                    sb.Append("\"unitCode\":").Append(JsonStr(item.UnitCode)).Append(',');
+                    sb.Append("\"unitName\":").Append(JsonStr(item.UnitName)).Append(',');
                     if (item.LineDiscount.HasValue)
                         sb.Append("\"lineDiscount\":").Append(JsonNum(item.LineDiscount.Value)).Append(',');
                     sb.Append("\"productCode\":").Append(JsonStr(item.ProductCode)).Append(',');

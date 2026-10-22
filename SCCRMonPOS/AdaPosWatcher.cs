@@ -811,7 +811,8 @@ namespace SCCRMonPOS
             string sql = @"
                 SELECT d.FNSdtSeqNo,   d.FTPdtCode,    d.FTPdtName,
                        d.FTSdtBarCode, d.FCSdtQty,     d.FCSdtSetPrice,
-                       d.FCSdtNet,     d.FCSdtDis,     d.FTPmhCode
+                       d.FCSdtNet,     d.FCSdtDis,     d.FTPmhCode,
+                       d.FTPunCode,    d.FTSdtUnitName
                 FROM   " + GetSafeTableName(receipt.DetailTable, "TPSTSalDT") + @" d
                 WHERE  d.FTShdDocNo = @docNo
                 ORDER BY d.FNSdtSeqNo";
@@ -829,6 +830,8 @@ namespace SCCRMonPOS
                             ProductCode   = Str(r, "FTPdtCode"),
                             ProductName   = Str(r, "FTPdtName"),
                             Barcode       = Str(r, "FTSdtBarCode"),
+                            UnitCode      = Str(r, "FTPunCode"),
+                            UnitName      = Str(r, "FTSdtUnitName"),
                             Qty           = Dec(r, "FCSdtQty"),
                             UnitPrice     = Dec(r, "FCSdtSetPrice"),
                             NetAmount     = Dec(r, "FCSdtNet"),

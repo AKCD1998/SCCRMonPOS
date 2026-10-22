@@ -48,7 +48,7 @@ internal static class PurchaseHistoryCheck
     {
         var r=new PosReceipt { DocNo=i.ReceiptPrefix+suffix,DocType="1",BranchCode=i.BranchCode,PosCode="TEST-POS",CashierCode="TEST-CASHIER",DocDate=DateTime.Today,DocTime="10:11:12",GrandTotal=drugOnly?100m:340m,Discount=drugOnly?0m:10m };
         if(!drugOnly)r.Items.Add(new PosReceiptItem { Seq=3,ProductCode="TEST-VIT",ProductName="วิตามิน fixture",Barcode="SYNTHETIC-BC",Qty=2,UnitPrice=130m,NetAmount=250m,LineDiscount=10m,PromotionCode="TEST-PROMO" });
-        r.Items.Add(new PosReceiptItem { Seq=5,ProductCode="TEST-DRUG",ProductName="เภสัช fixture",Barcode="SYNTHETIC-DRUG",Qty=1,UnitPrice=100m,NetAmount=100m });return r;
+        r.Items.Add(new PosReceiptItem { Seq=5,ProductCode="TEST-DRUG",ProductName="เภสัช fixture",Barcode="SYNTHETIC-DRUG",UnitCode="BOX",UnitName="กล่อง",Qty=1,UnitPrice=100m,NetAmount=100m });return r;
     }
     private static void Capture(Form form,string path)
     {
@@ -130,8 +130,10 @@ internal static class PurchaseHistoryCheck
             Check((bool)Call(form,"CanConfirm"));
             var request=(LoyaltyClaimRequest)Call(form,"BuildClaimRequest");
             Check(request.TotalAmount==0m && request.ReceiptTotalAmount==100m && request.Items.Length==1);
+            Check(request.Items[0].UnitCode=="BOX" && request.Items[0].UnitName=="กล่อง");
             string json=(string)typeof(ApiClient).GetMethod("BuildLoyaltyClaimJson",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{request});
             Check(json.Contains("\"receiptTotalAmount\":100") && json.Contains("SYNTHETIC-DRUG"));
+            Check(json.Contains("\"unitCode\":\"BOX\"") && json.Contains("กล่อง"));
             var receipt=Field<PosReceipt>(form,"_receipt");receipt.IsReturn=true;Check(!(bool)Call(form,"CanConfirm"));
             receipt.IsReturn=false;receipt.DocType="9";Check(!(bool)Call(form,"CanConfirm"));
         }
