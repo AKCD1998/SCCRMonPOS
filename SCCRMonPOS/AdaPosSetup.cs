@@ -19,6 +19,9 @@ namespace SCCRMonPOS
     internal static class AdaPosSetup
     {
         internal const int SuccessExitCode = 43;
+        internal const int ConnectionTimeoutSeconds = 15;
+        internal const int VerificationTimeoutSeconds = 60;
+        internal enum VerificationStage { Connect, DatabasePermissions, TablePermissions, ReceiptTables, ReceiptColumns, Branch }
         internal sealed class Connection
         {
             public string Server = @".\SQLEXPRESS", Database = "AdaAcc", User = "", Password = "", Branch = "";
@@ -106,26 +109,59 @@ namespace SCCRMonPOS
         internal static SqlConnectionStringBuilder ConnectionString(Connection settings, string server)
         {
             return new SqlConnectionStringBuilder { DataSource = server, InitialCatalog = settings.Database, UserID = settings.User,
-                Password = settings.Password, ConnectTimeout = 4, ApplicationName = "SCCRMonPOS-Setup-ReadOnly" };
+                Password = settings.Password, ConnectTimeout = ConnectionTimeoutSeconds, ApplicationName = "SCCRMonPOS-Setup-ReadOnly" };
         }
 
-        internal static string VerifyConnection(Connection settings)
+        private static string StageLabel(VerificationStage stage)
+        {
+            switch (stage)
+            {
+                case VerificationStage.DatabasePermissions: return "ตรวจสิทธิ์บัญชีฐานข้อมูล";
+                case VerificationStage.TablePermissions: return "ตรวจสิทธิ์แก้ไขรายตาราง";
+                case VerificationStage.ReceiptTables: return "อ่านรายชื่อตารางบิล";
+                case VerificationStage.ReceiptColumns: return "ตรวจโครงสร้างบิลและสินค้า";
+                case VerificationStage.Branch: return "ตรวจรหัสสาขา";
+                default: return "เชื่อมต่อ SQL";
+            }
+        }
+
+        internal static string VerificationError(VerificationStage stage, int sqlNumber)
+        {
+            if (stage == VerificationStage.Connect)
+            {
+                if (sqlNumber == -2) return "รอเชื่อม SQL เกิน " + ConnectionTimeoutSeconds + " วินาที กรุณาตรวจ Tailscale และ SQL Server แล้วลองอีกครั้ง";
+                if (sqlNumber == 18456 || sqlNumber == 18452) return "SQL ปฏิเสธการเข้าสู่ระบบ กรุณาตรวจบัญชีอ่านอย่างเดียวและรหัสผ่าน (SQL " + sqlNumber + ")";
+                return "ยังเชื่อม SQL ไม่ได้ กรุณาตรวจเซิร์ฟเวอร์และการเชื่อมต่อ (SQL " + sqlNumber + ")";
+            }
+            string label = StageLabel(stage);
+            if (sqlNumber == -2) return "เชื่อม SQL แล้ว แต่ขั้น" + label + "รอเกิน " + VerificationTimeoutSeconds + " วินาที กรุณารอสักครู่แล้วลองอีกครั้ง (SQL -2)";
+            if (sqlNumber == 1222) return "เชื่อม SQL แล้ว แต่ขั้น" + label + "กำลังรอล็อกฐานข้อมูล กรุณารอสักครู่แล้วลองอีกครั้ง (SQL 1222)";
+            return "เชื่อม SQL แล้ว แต่ขั้น" + label + "ไม่สำเร็จ กรุณาให้ผู้ดูแลตรวจฐาน AdaAcc (SQL " + sqlNumber + ")";
+        }
+
+        internal static string VerifyConnection(Connection settings) => VerifyConnectionWithProgress(settings, null);
+
+        internal static string VerifyConnectionWithProgress(Connection settings, Action<string> progress)
         {
             if (!UsableIdentity(settings) || settings.Database != "AdaAcc") throw new InvalidOperationException("ต้องใช้บัญชีอ่านอย่างเดียวสำหรับฐาน AdaAcc และไม่ใช้บัญชี sa");
             CheckEnvironment(settings);
             SqlConnection connection = null;
+            VerificationStage stage = VerificationStage.Connect;
             try
             {
+                progress?.Invoke("กำลังเชื่อมต่อ SQL…");
+                int? connectionFailure = null;
                 foreach (string server in AdaPosWatcher.BuildSetupServerCandidates(settings.Server))
                 {
                     var candidate = new SqlConnection(ConnectionString(settings, server).ConnectionString);
                     try { candidate.Open(); connection = candidate; break; }
-                    catch (SqlException) { candidate.Dispose(); }
+                    catch (SqlException error) { connectionFailure = error.Number; candidate.Dispose(); }
                 }
-                if (connection == null) throw new InvalidOperationException("ยังเชื่อมฐาน AdaPos ไม่ได้ กรุณาตรวจชื่อเซิร์ฟเวอร์ บัญชี และรหัสผ่านกับผู้ดูแล");
+                if (connection == null) throw new InvalidOperationException(connectionFailure.HasValue ? VerificationError(stage, connectionFailure.Value) : "ยังเชื่อมฐาน AdaPos ไม่ได้ กรุณาตรวจชื่อเซิร์ฟเวอร์กับผู้ดูแล");
                 using (var command = connection.CreateCommand())
                 {
-                    command.CommandTimeout = 10;
+                    command.CommandTimeout = VerificationTimeoutSeconds;
+                    stage = VerificationStage.DatabasePermissions; progress?.Invoke("กำลัง" + StageLabel(stage) + "…");
                     command.CommandText = "SELECT IS_SRVROLEMEMBER('sysadmin'),IS_SRVROLEMEMBER('securityadmin'),IS_SRVROLEMEMBER('serveradmin'),IS_SRVROLEMEMBER('setupadmin'),IS_SRVROLEMEMBER('processadmin'),IS_SRVROLEMEMBER('bulkadmin'),IS_MEMBER('db_owner'),IS_MEMBER('db_datawriter'),IS_MEMBER('db_ddladmin'),IS_MEMBER('db_securityadmin'),IS_MEMBER('db_accessadmin'),IS_MEMBER('db_backupoperator'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','CONTROL'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','ALTER'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','INSERT'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','UPDATE'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','DELETE'),HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','SELECT')";
                     using (var reader = command.ExecuteReader())
                     {
@@ -134,8 +170,10 @@ namespace SCCRMonPOS
                             if (reader.IsDBNull(i) || Convert.ToInt32(reader.GetValue(i)) != (i == reader.FieldCount - 1 ? 1 : 0))
                                 throw new InvalidOperationException("บัญชีนี้มีสิทธิ์เกินกว่าการอ่านข้อมูล กรุณาใช้บัญชีอ่านอย่างเดียว");
                     }
+                    stage = VerificationStage.TablePermissions; progress?.Invoke("กำลัง" + StageLabel(stage) + "… รอได้ถึง " + VerificationTimeoutSeconds + " วินาที");
                     command.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0 AND (HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(schema_id))+'.'+QUOTENAME(name),'OBJECT','INSERT')=1 OR HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(schema_id))+'.'+QUOTENAME(name),'OBJECT','UPDATE')=1 OR HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(schema_id))+'.'+QUOTENAME(name),'OBJECT','DELETE')=1 OR HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME(schema_id))+'.'+QUOTENAME(name),'OBJECT','ALTER')=1)";
                     if (Convert.ToInt32(command.ExecuteScalar()) != 0) throw new InvalidOperationException("บัญชีนี้ยังแก้ไขตารางได้ กรุณาใช้บัญชีอ่านอย่างเดียว");
+                    stage = VerificationStage.ReceiptTables; progress?.Invoke("กำลัง" + StageLabel(stage) + "…");
                     command.CommandText = "SELECT name FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND (name='TPSTSalHD' OR name LIKE 'TSHD[0-9][0-9][0-9]')";
                     var headers = new List<string>();
                     using (var reader = command.ExecuteReader()) while (reader.Read()) headers.Add(reader.GetString(0));
@@ -145,10 +183,12 @@ namespace SCCRMonPOS
                     {
                         if (header != "TPSTSalHD" && !Regex.IsMatch(header, @"^TSHD\d{3}$")) throw new InvalidOperationException("รูปแบบตารางบิลไม่รองรับ");
                         string detail = header == "TPSTSalHD" ? "TPSTSalDT" : "TSDT" + header.Substring(4);
+                        stage = VerificationStage.ReceiptColumns; progress?.Invoke("กำลัง" + StageLabel(stage) + "…");
                         command.CommandText = "SELECT TOP (0) FTShdDocNo,FTBchCode,FTPosCode,FTUsrCode,FDShdDocDate,FTShdDocTime,FCShdGrand,FCShdDis,FTShdDocType,FTShdStaPaid FROM dbo.[" + header + "]; SELECT TOP (0) FTShdDocNo,FNSdtSeqNo,FTPdtCode,FTPdtName,FTSdtBarCode,FCSdtQty,FCSdtSetPrice,FCSdtNet,FCSdtDis,FTPmhCode,FTPunCode,FTSdtUnitName FROM dbo.[" + detail + "]";
                         using (var reader = command.ExecuteReader()) { while (reader.NextResult()) { } }
                         if (!string.IsNullOrWhiteSpace(settings.Branch))
                         {
+                            stage = VerificationStage.Branch; progress?.Invoke("กำลัง" + StageLabel(stage) + "…");
                             command.CommandText = "SELECT TOP (1) FTBchCode FROM dbo.[" + header + "]";
                             var branch = command.ExecuteScalar();
                             if (branch != null && branch != DBNull.Value) { anyReceipt = true; branchSeen |= Convert.ToString(branch).Trim() == settings.Branch; }
@@ -158,6 +198,7 @@ namespace SCCRMonPOS
                 }
                 return connection.DataSource;
             }
+            catch (SqlException error) { throw new InvalidOperationException(VerificationError(stage, error.Number)); }
             finally { connection?.Dispose(); }
         }
 
@@ -293,7 +334,8 @@ namespace SCCRMonPOS
                 {
                     working = true; connect.Enabled = false; cancel.Enabled = false; status.Text = "กำลังตรวจบัญชีอ่านอย่างเดียวและโครงสร้างบิล…";
                     var input = new Connection { Server = server.Text.Trim(), Database = database.Text.Trim(), User = user.Text.Trim(), Password = password.Text };
-                    try { await Task.Run(() => { EnsureStopped(); VerifyConnection(input); Apply(directory, input); }); working = false; DialogResult = DialogResult.OK; Close(); }
+                    Action<string> progress = text => BeginInvoke((Action)(() => { if (working && !IsDisposed) status.Text = text; }));
+                    try { await Task.Run(() => { EnsureStopped(); VerifyConnectionWithProgress(input, progress); progress("กำลังบันทึกค่าการเชื่อมต่อ…"); Apply(directory, input); }); working = false; DialogResult = DialogResult.OK; Close(); }
                     catch (Exception error) { status.Text = SafeError(error); }
                     finally { working = false; connect.Enabled = true; cancel.Enabled = true; }
                 };

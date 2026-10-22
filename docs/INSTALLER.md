@@ -1,5 +1,26 @@
 # Combined SCCRM installer — 1.3.2
 
+## 1.3.5: slow SQL metadata checks
+
+Branch 001 POS1 and POS2 both reported SQL -2 during setup against the same
+`SC_001\SQLEXPRESS` / `AdaAcc`. Read-only reproduction confirmed successful login
+and database permissions, followed by intermittent timeouts reading catalog
+metadata. One catalog count of 460 user tables completed after 38 seconds; the
+old per-command budget was ten seconds. A three-second session-only lock-wait
+probe still produced command timeout -2 rather than lock timeout 1222, so the
+underlying server delay has not been proven to be a blocking transaction.
+No session was killed and no database data, permissions or server configuration
+was changed. The temporary diagnostic connection was closed.
+
+Setup 1.3.5 allows 15 seconds for connection and 60 seconds per verification
+command, retains every existing read-only/role/schema/branch check, and reports
+the current phase in the connection dialog. Authentication rejection, connection
+timeout, an authenticated metadata timeout, and a reported lock timeout have
+separate safe messages without raw SQL error text or credentials. Installation
+still fails closed if any verification cannot finish; no timeout is treated as
+approval. Existing app updates stay optional. Server-side latency may still
+require separate investigation if the larger bounded budget is exceeded.
+
 Download `SCCRMonPOS-Setup-1.3.2.exe` from the existing StockDay admin page. Exit
 SCCRM first; AdaPos can remain open. There is no separate ZIP or command script.
 The same company device/Tailscale policy runs before any setup connection work.

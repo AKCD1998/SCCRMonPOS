@@ -38,6 +38,12 @@ internal static class AdaPosSetupCheck
             var inputSettings = new AdaPosSetup.Connection { User = "fixture-reader", Password = "fixture;Password=bad;\"<>&'" };
             var builder = AdaPosSetup.ConnectionString(inputSettings, @".\SQLEXPRESS");
             Check(builder.Password == inputSettings.Password && builder.UserID == inputSettings.User && !builder.IntegratedSecurity, "connection-string escaping");
+            Check(builder.ConnectTimeout > 4 && builder.ConnectTimeout <= 30, "bounded connection budget tolerates slow pre-login");
+            string connectTimeout = AdaPosSetup.VerificationError(AdaPosSetup.VerificationStage.Connect, -2);
+            string tableTimeout = AdaPosSetup.VerificationError(AdaPosSetup.VerificationStage.TablePermissions, -2);
+            Check(!connectTimeout.Contains("เชื่อม SQL แล้ว") && tableTimeout.Contains("เชื่อม SQL แล้ว") && tableTimeout.Contains("รายตาราง"), "timeouts distinguish connection from an authenticated metadata check");
+            Check(AdaPosSetup.VerificationError(AdaPosSetup.VerificationStage.Connect, 18456).Contains("เข้าสู่ระบบ") && !tableTimeout.Contains("รหัสผ่าน"), "authentication rejection is distinct from slow metadata");
+            Check(AdaPosSetup.VerificationError(AdaPosSetup.VerificationStage.ReceiptColumns, 1222).Contains("ล็อก") && AdaPosSetup.VerificationError(AdaPosSetup.VerificationStage.ReceiptColumns, 207).Contains("207"), "lock and schema failures retain safe phase diagnostics");
             Reject(() => AdaPosSetup.VerifyConnection(new AdaPosSetup.Connection { User = "sa", Password = "fixture" }), "refuse sa before connecting");
             Directory.CreateDirectory(Path.Combine(directory, "data"));
             string config = Path.Combine(directory, "SCCRMonPOS.exe.config"), secret = Path.Combine(directory, "SCCRMonPOS.secrets.config"), session = Path.Combine(directory, "data", "staff-config.json");
