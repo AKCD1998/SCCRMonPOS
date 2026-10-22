@@ -17,14 +17,21 @@ Your administrator may recommend an updated release. SCCRM shows a notification;
 you choose when to download, install and restart the membership companion.
 
 Existing installation:
-Close SCCRM before installing and select its existing folder to keep using its
-configuration and local session. Setup never replaces an existing .exe.config.
+Close SCCRM before installing and select its existing folder. Setup backs up
+configuration and merges the verified AdaPos settings, preserving unrelated
+settings, private API credentials, the staff session, queues, and receipt history.
 SCCRMonPOS.secrets.config and the data folder are retained when uninstalling.
 
 New installation:
-AdaPos database monitoring is disabled initially. Membership tools use the existing
-web backend. Your administrator configures staff-device access and any local POS
-connection using SCCRMonPOS.secrets.config or SCCRMONPOS__ environment settings.
-No production credentials are included in Setup.
+Setup reads existing SCCRM connection settings or the local StockDay sync agent's
+read-only database identity. It discovers the current local SQL instance port,
+checks read-only permissions and receipt tables, and enables the watcher before
+installation completes. If no suitable settings exist, the connection dialog
+asks the administrator for the AdaAcc read-only account. It never creates SQL
+accounts or writes to AdaAcc. No production credentials are included in Setup.
+
+The connection password is stored only in SCCRMonPOS.secrets.config on this
+computer, with access restricted to the installing user, SYSTEM, and administrators.
+Initial staff sign-in still uses your administrator's existing staff PIN.
 
 This installer was built with Inno Setup: https://jrsoftware.org/

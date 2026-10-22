@@ -34,4 +34,8 @@ jobs:
           msbuild tools/PurchaseHistoryCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build-verify/purchase-history-check/PurchaseHistoryCheck.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/AdaPosSetupCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/adapos-setup-check/AdaPosSetupCheck.exe
           exit $LASTEXITCODE

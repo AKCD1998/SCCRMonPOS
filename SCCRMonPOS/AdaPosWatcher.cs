@@ -444,10 +444,22 @@ namespace SCCRMonPOS
 
         private string BuildConnectionString(string server)
         {
-            return
-                "Server=" + server + ";Database=" + _database + ";" +
-                "User Id=" + _user + ";Password=" + _password + ";" +
-                "Connect Timeout=5;Application Name=SCCRMonPOS;";
+            return new SqlConnectionStringBuilder { DataSource = server, InitialCatalog = _database,
+                UserID = _user, Password = _password, ConnectTimeout = 5, ApplicationName = "SCCRMonPOS" }.ConnectionString;
+        }
+
+        internal static IEnumerable<string> BuildSetupServerCandidates(string server)
+        {
+            string host = ExtractHostPart(server);
+            if (IsLoopbackHost(host) || IsLocalMachineHost(host))
+            {
+                int slash = server.IndexOf('\\');
+                string name = slash >= 0 ? server.Substring(slash + 1) : "MSSQLSERVER";
+                foreach (LocalSqlInstance instance in GetLocalSqlInstances())
+                    if (string.Equals(instance.InstanceName, name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(instance.TcpPort) && instance.TcpPort != "0")
+                        yield return "127.0.0.1," + instance.TcpPort;
+            }
+            yield return server;
         }
 
         private IEnumerable<string> BuildServerCandidates()

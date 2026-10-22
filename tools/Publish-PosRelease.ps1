@@ -57,11 +57,13 @@ try {
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/device-access-check/DeviceAccessCheck.exe') @()
         Invoke-PosCommand $posMsbuild @('tools/PurchaseHistoryCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/purchase-history-check/PurchaseHistoryCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/AdaPosSetupCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
+        Invoke-PosCommand (Join-Path $posRoot 'build-verify/adapos-setup-check/AdaPosSetupCheck.exe') @()
         $posExe = Join-Path $posStage 'SCCRMonPOS.exe'
         Copy-Item -LiteralPath 'SCCRMonPOS/bin/Release/SCCRMonPOS.exe' -Destination $posExe
         $posManifest = Join-Path $posStage 'stable.json'
         $posPayload = [ordered]@{
-            schemaVersion = 1; releaseId = $ReleaseId; version = $Version; deviceAccessVersion = 1
+            schemaVersion = 1; releaseId = $ReleaseId; version = $Version; deviceAccessVersion = 1; adaposSetupVersion = 1
             downloadUrl = "https://github.com/$posRepository/releases/download/$ReleaseId/SCCRMonPOS.exe"
             sha256 = (Get-FileHash -LiteralPath $posExe -Algorithm SHA256).Hash.ToLowerInvariant()
             size = (Get-Item -LiteralPath $posExe).Length; notes = $posNotes

@@ -61,8 +61,8 @@ Name: "startwithwindows"; Description: "Start SCCRM when I sign in to Windows"; 
 [Files]
 Source: "{#ReleaseDir}\SCCRMonPOS.exe"; DestDir: "{tmp}"; DestName: "SCCRMonPOS-DeviceCheck.exe"; Flags: dontcopy
 Source: "{#ReleaseDir}\SCCRMonPOS.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Existing terminal configuration is never replaced or removed by Setup.
-Source: "Defaults\SCCRMonPOS.config.template"; DestDir: "{app}"; DestName: "SCCRMonPOS.exe.config"; Flags: onlyifdoesntexist uninsneveruninstall
+; The bundled connection helper creates/merges configuration after a successful
+; SELECT-only connection check. Neither configuration nor runtime data is uninstalled.
 Source: "Assets\sc.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Getting-started.txt"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -72,12 +72,12 @@ Name: "{userdesktop}\SCCRM"; Filename: "{app}\SCCRMonPOS.exe"; WorkingDir: "{app
 Name: "{userstartup}\SCCRM"; Filename: "{app}\SCCRMonPOS.exe"; WorkingDir: "{app}"; IconFilename: "{app}\sc.ico"; Tasks: startwithwindows
 
 [Run]
-Filename: "{app}\SCCRMonPOS.exe"; Description: "Open SCCRM POS Companion"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\SCCRMonPOS.exe"; Description: "Open SCCRM POS Companion"; Flags: nowait postinstall skipifsilent
 
 [Messages]
 WelcomeLabel1=Welcome to the SCCRM Setup Wizard
 WelcomeLabel2=This will install SCCRM POS Companion on your computer.%n%nRegister and find members, or let customers scan a QR code on the customer display.
-FinishedLabel=Setup has finished installing SCCRM POS Companion.%n%nOpen SCCRM from the Start menu or desktop shortcut. Use your existing staff PIN to sign in.%n%nFuture updates are offered for you to install when convenient.
+FinishedLabel=Setup has installed SCCRM and verified its read-only AdaPos connection.%n%nOpen SCCRM and use your existing staff PIN to sign in. Press Ctrl+Alt+Q for membership tools.%n%nFuture app updates remain optional.
 
 [Code]
 function InitializeSetup: Boolean;
@@ -96,4 +96,18 @@ begin
   if not Result then
     SuppressibleMsgBox('This computer is not approved for SCCRM.' + #13#10 +
       'Connect to the company Tailscale network. The approved device identity and AdaSoftware installation must both match. Contact your administrator.', mbError, MB_OK, IDOK);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  SetupResult: Integer;
+  SetupArgs: String;
+begin
+  Result := '';
+  SetupArgs := '--setup-adapos "' + ExpandConstant('{app}') + '"';
+  if WizardSilent then SetupArgs := SetupArgs + ' --silent';
+  if not Exec(ExpandConstant('{tmp}\SCCRMonPOS-DeviceCheck.exe'), SetupArgs, '', SW_SHOWNORMAL, ewWaitUntilTerminated, SetupResult) then
+    Result := 'Could not start AdaPos connection setup. No application files were installed.'
+  else if SetupResult <> 43 then
+    Result := 'AdaPos connection setup did not complete. Close SCCRM and check the read-only database connection, then try again.';
 end;

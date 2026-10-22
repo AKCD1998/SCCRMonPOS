@@ -29,7 +29,8 @@ Evidence at audit time `2026-10-21T10:46:48Z`:
 
 No branch identity was inferred solely from a duplicate or generic hostname.
 Approval confirms software presence, not that database monitoring or a staff PIN
-has been configured. The sanitized installer starts with POS monitoring disabled.
+has been configured. The original 1.3.0 installer starts with monitoring disabled;
+the combined 1.3.2 installer enables it only after verifying a read-only connection.
 
 ## Devices still blocked
 

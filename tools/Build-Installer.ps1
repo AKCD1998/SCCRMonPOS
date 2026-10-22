@@ -1,7 +1,7 @@
 param(
-    [string]$ReleaseDirectory = (Join-Path $PSScriptRoot '../build-verify/releases/pos-1.3.0'),
+    [string]$ReleaseDirectory = (Join-Path $PSScriptRoot '../build-verify/releases/pos-1.3.2'),
     [string]$CompilerPath,
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '../build-verify/installer/1.3.0'),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '../build-verify/installer/1.3.2'),
     [ValidatePattern('^SCCRM-INSTALLER-TEST-[a-fA-F0-9]{32}$')][string]$TestAppId
 )
 $ErrorActionPreference = 'Stop'
@@ -23,6 +23,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Release signature or EXE verification failed.'
 $posEnvelope = Get-Content -LiteralPath (Join-Path $posRelease 'stable.json') -Raw | ConvertFrom-Json
 $posMetadata = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($posEnvelope.payload)) | ConvertFrom-Json
 if ($posMetadata.deviceAccessVersion -ne 1 -or [Version]$posMetadata.version -lt [Version]'1.3.0') { throw 'Setup requires a signed device-restricted release, version 1.3.0 or later.' }
+if ($posMetadata.adaposSetupVersion -ne 1 -or [Version]$posMetadata.version -lt [Version]'1.3.2') { throw 'This combined Setup requires the reviewed native AdaPos setup command, version 1.3.2 or later.' }
 if ($posMetadata.sourceDirty -or $posMetadata.version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw 'Setup requires a reviewed numeric release version.' }
 & (Join-Path $PSScriptRoot 'Generate-InstallerBranding.ps1')
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
