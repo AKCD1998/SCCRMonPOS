@@ -51,6 +51,16 @@
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
       ]
+    },
+    {
+      "nodeId": "nEdQXowQ4t11CNTRL",
+      "hostname": "POS2",
+      "ipv4": "100.93.254.58",
+      "status": "approved",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
     }
   ]
 }
