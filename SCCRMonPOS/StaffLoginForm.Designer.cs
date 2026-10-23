@@ -99,7 +99,7 @@ namespace SCCRMonPOS
             this.Name            = "StaffLoginForm";
             this.StartPosition   = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text            = "SCCRM — ยืนยันตัวตนพนักงาน";
-            this.TopMost         = false;
+            this.TopMost         = true;
             this.ResumeLayout(false);
             this.PerformLayout();
         }

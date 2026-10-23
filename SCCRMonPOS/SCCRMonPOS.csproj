@@ -56,6 +56,7 @@
     <Compile Include="CustomerDisplay.cs" />
     <Compile Include="CentralPromotions.cs" />
     <Compile Include="CashierQrOverlay.cs" />
+    <Compile Include="CashierWindowGuard.cs" />
     <Compile Include="Updates\UpdateRelease.cs" />
     <Compile Include="Updates\UpdateInstaller.cs" />
     <Compile Include="Updates\UpdateService.cs" />

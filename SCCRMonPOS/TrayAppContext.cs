@@ -45,6 +45,7 @@ namespace SCCRMonPOS
         private Timer _updateTimer;
         private ToolStripMenuItem _miUpdate;
         private Updates.UpdateForm _updateForm;
+        private CashierWindowGuard _windowGuard;
 
         // ─────────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ namespace SCCRMonPOS
         {
             Directory.CreateDirectory(_dataFolder);
             _customerDisplay = new CustomerDisplayController(_dataFolder);
+            _windowGuard = new CashierWindowGuard();
 
             string baseUrl = AppSettingsProvider.Get("ApiBaseUrl", "https://sc-official-website.onrender.com");
 
@@ -91,6 +93,7 @@ namespace SCCRMonPOS
         private void PromptStaffLogin()
         {
             var loginForm = new StaffLoginForm(_api, _auth);
+            _windowGuard.Protect(loginForm);
             DialogResult result = loginForm.ShowDialog();
 
             if (result == DialogResult.OK)
@@ -339,6 +342,7 @@ namespace SCCRMonPOS
         {
             if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed)
             {
+                _windowGuard.Restore(_activeMemberClaimForm);
                 if (_activeMemberClaimForm.WindowState == FormWindowState.Minimized)
                     _activeMemberClaimForm.WindowState = FormWindowState.Normal;
                 _activeMemberClaimForm.BringToFront();
@@ -360,6 +364,7 @@ namespace SCCRMonPOS
 
             _activeMemberClaimForm = new MemberClaimForm(
                 _api, _watcher, _bahtPerPoint, _auth.DeviceId, prefill, _customerDisplay);
+            _windowGuard.Protect(_activeMemberClaimForm);
             _activeMemberClaimForm.ShowUpdateNotice(_updates?.Available?.Version, OpenUpdateForm);
 
             _activeMemberClaimForm.FormClosed += (s, e) =>
@@ -488,6 +493,7 @@ namespace SCCRMonPOS
                 _updateTimer?.Dispose();
                 _updates?.Dispose();
                 _updateForm?.Dispose();
+                _windowGuard?.Dispose();
             }
             base.Dispose(disposing);
         }

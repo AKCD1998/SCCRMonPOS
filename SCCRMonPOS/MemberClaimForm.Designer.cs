@@ -579,7 +579,7 @@ namespace SCCRMonPOS
             this.ShowInTaskbar = true;
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "SCCRM - สะสมแต้ม";
-            this.TopMost = false;
+            this.TopMost = true;
             this.Load += new System.EventHandler(this.MemberClaimForm_Load);
             this._navPanel.ResumeLayout(false);
             this._itemsHost.ResumeLayout(false);
