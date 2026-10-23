@@ -1,5 +1,7 @@
 # SCCRMonPOS
 
+Receipt status: [saved receipt and stored member display](docs/RECEIPT_CLAIM_STATUS.md) (1.3.9).
+
 POS companion agent for FRONT2. Bridges AdaPos HyperMart 4.6006.30 to the SCCRM loyalty backend.
 
 Current desktop feature guide: [QR customer display and optional updates](docs/CUSTOMER_DISPLAY_AND_UPDATES.md).

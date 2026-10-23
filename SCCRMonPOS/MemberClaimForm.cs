@@ -20,6 +20,12 @@ namespace SCCRMonPOS
         private bool _quoteLoading;
         private bool _uiBusy;
         private bool _claimCompleted;
+        private ReceiptClaimStatus _receiptClaimStatus;
+        private bool _receiptStatusVerified, _receiptStatusChecking, _receiptStatusError;
+        private int _receiptStatusGeneration;
+        private Task _receiptStatusCheckTask;
+        private Label _receiptStatusLabel;
+        private ToolTip _receiptStatusTip;
         private Timer _promotionTimer;
         internal Func<bool> IsParkedForSales;
 
@@ -59,17 +65,91 @@ namespace SCCRMonPOS
             _customerDisplay = customerDisplay ?? new CustomerDisplayController(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
 
             InitializeComponent();
+            AddReceiptStatusLabel();
             Text += " — " + (_watcher?.TerminalDescription ?? "ยังไม่กำหนดเครื่องขาย");
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
-            FormClosed += (s, e) => { if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
+            FormClosed += (s, e) => { ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
             _promotionTimer = new Timer { Interval = 30000 };
-            _promotionTimer.Tick += async (s, e) => await RefreshCentralQuoteAsync();
+            _promotionTimer.Tick += async (s, e) => {
+                await RefreshCentralQuoteAsync();
+                if (!_uiBusy && !_claimCompleted && _receiptClaimStatus?.Claimed != true) await RefreshReceiptClaimStatusAsync();
+            };
             _promotionTimer.Start();
 
             if (prefilledReceipt != null)
                 LoadReceipt(prefilledReceipt);
+        }
+
+        private void AddReceiptStatusLabel()
+        {
+            int scale = Math.Max(96, DeviceDpi);
+            int height = 20 * scale / 96, margin = 2 * scale / 96;
+            _receiptStatusLabel = new Label {
+                Name = "ReceiptClaimStatus", AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(4, 0, 4, 0), Visible = false,
+                Bounds = new Rectangle(_pnlDivider.Left, _pnlDivider.Top - height - margin, _pnlDivider.Width, height),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _receiptStatusTip = new ToolTip();
+            Controls.Add(_receiptStatusLabel);
+            _receiptStatusLabel.BringToFront();
+        }
+
+        private void InvalidateReceiptClaimStatus()
+        {
+            ++_receiptStatusGeneration;
+            _receiptStatusCheckTask = null;
+            _receiptClaimStatus = null;
+            _receiptStatusVerified = _receiptStatusChecking = _receiptStatusError = false;
+            _claimCompleted = false;
+        }
+
+        private Task RefreshReceiptClaimStatusAsync()
+        {
+            if (_receipt == null || IsDisposed) return Task.CompletedTask;
+            if (_receiptStatusCheckTask != null && !_receiptStatusCheckTask.IsCompleted) return _receiptStatusCheckTask;
+            var receipt = _receipt;
+            int generation = ++_receiptStatusGeneration;
+            _receiptStatusVerified = false; _receiptStatusChecking = true; _receiptStatusError = false;
+            RenderReceiptClaimStatus();
+            return _receiptStatusCheckTask = CheckReceiptClaimStatusAsync(receipt, generation);
+        }
+
+        private async Task CheckReceiptClaimStatusAsync(PosReceipt receipt, int generation)
+        {
+            try {
+                var status = await _api.GetReceiptClaimStatusAsync(receipt.BranchCode, receipt.DocNo);
+                if (IsDisposed || generation != _receiptStatusGeneration || !ReferenceEquals(receipt, _receipt)) return;
+                _receiptClaimStatus = status; _receiptStatusVerified = true;
+            }
+            catch {
+                if (IsDisposed || generation != _receiptStatusGeneration || !ReferenceEquals(receipt, _receipt)) return;
+                _receiptClaimStatus = null; _receiptStatusError = true;
+            }
+            finally {
+                if (!IsDisposed && generation == _receiptStatusGeneration && ReferenceEquals(receipt, _receipt)) {
+                    _receiptStatusChecking = false; RenderReceiptClaimStatus();
+                }
+            }
+        }
+
+        private void RenderReceiptClaimStatus()
+        {
+            if (_receiptStatusLabel == null || IsDisposed) return;
+            bool claimed = _receiptClaimStatus?.Claimed == true;
+            _receiptStatusLabel.Visible = _receipt != null;
+            _receiptStatusLabel.Text = _receiptStatusChecking ? "กำลังตรวจสอบสถานะบิล…" :
+                _receiptStatusError ? "ตรวจสถานะบิลไม่ได้ — กดโหลดบิลเพื่อลองใหม่" :
+                claimed ? "บันทึกแล้ว · สมาชิก: " + (string.IsNullOrWhiteSpace(_receiptClaimStatus.MemberName) ? "ไม่ได้ระบุชื่อ" : _receiptClaimStatus.MemberName) +
+                    (string.IsNullOrWhiteSpace(_receiptClaimStatus.MemberCode) ? "" : " (" + _receiptClaimStatus.MemberCode + ")") :
+                _receiptStatusVerified ? "ยังไม่ได้บันทึกให้สมาชิก" : "กำลังตรวจสอบสถานะบิล…";
+            _receiptStatusLabel.ForeColor = _receiptStatusError ? Color.Firebrick : claimed ? Color.FromArgb(24, 110, 52) : Color.FromArgb(18, 74, 132);
+            _receiptStatusLabel.BackColor = _receiptStatusError ? Color.FromArgb(255, 235, 235) : claimed ? Color.FromArgb(233, 247, 237) : Color.FromArgb(243, 248, 255);
+            _receiptStatusTip.SetToolTip(_receiptStatusLabel, _receiptStatusLabel.Text);
+            _btnConfirm.Text = claimed ? "บันทึกแล้ว" : "ยืนยันบิล / สะสมแต้ม";
+            UpdateConfirmButton();
         }
 
         private void WireEvents()
@@ -168,10 +248,12 @@ namespace SCCRMonPOS
 
         private void LoadReceipt(PosReceipt receipt)
         {
+            InvalidateReceiptClaimStatus();
             if (_watcher == null || !_watcher.OwnsReceipt(receipt))
             {
                 _receipt = null;
                 PopulateItemsList(null);
+                RenderReceiptClaimStatus();
                 SetStatus("บิลไม่ตรงกับสาขา / เครื่องขายนี้ จึงไม่สามารถเลือกบิลได้", true);
                 UpdateConfirmButton();
                 return;
@@ -182,6 +264,7 @@ namespace SCCRMonPOS
             PopulateItemsList(receipt);
             ShowMemberSummary(_selectedMember);
             UpdateConfirmButton();
+            _ = RefreshReceiptClaimStatusAsync();
             _ = RefreshCentralQuoteAsync();
         }
 
@@ -228,6 +311,8 @@ namespace SCCRMonPOS
             {
                 SetStatus("ไม่พบบิลของเครื่องขายนี้ กรุณาตรวจเลขบิลและเครื่องที่ออกบิล", true);
                 _receipt = null;
+                InvalidateReceiptClaimStatus();
+                RenderReceiptClaimStatus();
                 _lvItems.Items.Clear();
                 _lblTotal.Text = "ยอดรวม: -";
                 _lblPreviewPoints.Text = "แต้มที่จะได้รับ: -";
@@ -593,15 +678,26 @@ namespace SCCRMonPOS
             string errorMsg = null;
             try
             {
+                // The display is advisory; recheck before submitting as well.
+                // The database unique constraint remains the final race guard.
+                await RefreshReceiptClaimStatusAsync();
+                if (!_receiptStatusVerified || _receiptClaimStatus?.Claimed != false) {
+                    SetStatus(_receiptStatusVerified ? "บิลนี้บันทึกให้สมาชิกแล้ว" : "ตรวจสถานะบิลไม่ได้ กรุณากดโหลดบิลเพื่อลองใหม่", !_receiptStatusVerified);
+                    return;
+                }
                 response = await _api.SubmitLoyaltyClaimAsync(BuildClaimRequest());
             }
             catch (ApiException ex)
             {
                 errorMsg = MapApiError(ex.Message);
+                InvalidateReceiptClaimStatus();
+                await RefreshReceiptClaimStatusAsync();
             }
             catch (Exception ex)
             {
                 errorMsg = "เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ: " + ex.Message;
+                InvalidateReceiptClaimStatus();
+                await RefreshReceiptClaimStatusAsync();
             }
             finally
             {
@@ -615,6 +711,12 @@ namespace SCCRMonPOS
             }
 
             _claimCompleted = true;
+            _receiptStatusVerified = true;
+            _receiptClaimStatus = new ReceiptClaimStatus { Claimed = true, BranchCode = _receipt.BranchCode, ReceiptNo = _receipt.DocNo,
+                ClaimId = response.ClaimId, MemberId = _selectedMember.Id,
+                MemberName = string.IsNullOrWhiteSpace(response.MemberName) ? _selectedMember.DisplayName : response.MemberName,
+                MemberCode = _selectedMember.MemberCode };
+            RenderReceiptClaimStatus();
             ShowSuccess(response);
         }
 
@@ -705,7 +807,8 @@ namespace SCCRMonPOS
 
         private bool CanConfirm()
         {
-            return !_uiBusy && !_claimCompleted && _receipt != null && !_receipt.IsReturn && _receipt.DocType != "9" &&
+            return !_uiBusy && !_claimCompleted && _receiptStatusVerified && !_receiptStatusChecking && _receiptClaimStatus?.Claimed == false &&
+                _receipt != null && !_receipt.IsReturn && _receipt.DocType != "9" &&
                 _watcher != null && _watcher.OwnsReceipt(_receipt) &&
                 !string.IsNullOrWhiteSpace(_receipt.DocNo) && !string.IsNullOrWhiteSpace(_receipt.BranchCode) &&
                 _receipt.GrandTotal > 0m && _receipt.Items != null && _receipt.Items.Count > 0 &&

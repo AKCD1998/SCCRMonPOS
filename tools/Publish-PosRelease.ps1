@@ -61,6 +61,8 @@ try {
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/adapos-setup-check/AdaPosSetupCheck.exe') @()
         Invoke-PosCommand $posMsbuild @('tools/ReceiptScopeCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/receipt-scope-check/ReceiptScopeCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/ReceiptClaimStatusCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
+        Invoke-PosCommand (Join-Path $posRoot 'build-verify/receipt-claim-status-check/ReceiptClaimStatusCheck.exe') @()
         $posExe = Join-Path $posStage 'SCCRMonPOS.exe'
         Copy-Item -LiteralPath 'SCCRMonPOS/bin/Release/SCCRMonPOS.exe' -Destination $posExe
         $posManifest = Join-Path $posStage 'stable.json'

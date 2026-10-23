@@ -2,9 +2,10 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 [assembly: AssemblyTitle("SCCRMonPOS")]
 [assembly: AssemblyProduct("SCCRMonPOS")]
-[assembly: AssemblyVersion("1.3.8.0")]
-[assembly: AssemblyFileVersion("1.3.8.0")]
+[assembly: AssemblyVersion("1.3.9.0")]
+[assembly: AssemblyFileVersion("1.3.9.0")]
 [assembly: InternalsVisibleTo("AdaPosSetupCheck")]
 [assembly: InternalsVisibleTo("DesktopFeatureCheck")]
 [assembly: InternalsVisibleTo("PurchaseHistoryCheck")]
 [assembly: InternalsVisibleTo("ReceiptScopeCheck")]
+[assembly: InternalsVisibleTo("ReceiptClaimStatusCheck")]
