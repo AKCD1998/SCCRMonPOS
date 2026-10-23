@@ -67,6 +67,10 @@ internal static class ReceiptScopeCheck
             {
                 Call(form, "AddMemberRow", new MemberSearchResult { Id = "fixture", DisplayName = "Fixture", PointsAvailable = true });
                 Call(form, "SelectMemberAtRow", 0);
+                // This suite isolates register ownership. The loopback status suite
+                // separately verifies that only a real successful lookup enables this.
+                typeof(MemberClaimForm).GetField("_receiptStatusVerified", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, true);
+                typeof(MemberClaimForm).GetField("_receiptClaimStatus", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, new ReceiptClaimStatus { Claimed = false });
                 Check((bool)Call(form, "CanConfirm"), "own bill can be confirmed");
                 Check(((LoyaltyClaimRequest)Call(form, "BuildClaimRequest")).PosCode == scope.PosCode, "claim carries owning register");
                 var receipt = (PosReceipt)typeof(MemberClaimForm).GetField("_receipt", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form);

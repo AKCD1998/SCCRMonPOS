@@ -57,6 +57,17 @@ namespace SCCRMonPOS
         public bool PharmacyMedRecordAvailable { get; set; } = true;
     }
 
+    public class ReceiptClaimStatus
+    {
+        public bool Claimed { get; set; }
+        public string BranchCode { get; set; }
+        public string ReceiptNo { get; set; }
+        public string ClaimId { get; set; }
+        public string MemberId { get; set; }
+        public string MemberName { get; set; }
+        public string MemberCode { get; set; }
+    }
+
     public class LoyaltyClaimItem
     {
         public int Seq { get; set; }
@@ -435,6 +446,20 @@ namespace SCCRMonPOS
             return ParseMemberSearchResultFromApiResponse(json);
         }
 
+        public async Task<ReceiptClaimStatus> GetReceiptClaimStatusAsync(string branchCode, string receiptNo)
+        {
+            RequireValidToken();
+            if (string.IsNullOrWhiteSpace(branchCode) || string.IsNullOrWhiteSpace(receiptNo))
+                throw new ApiException("branchCode and receiptNo are required.");
+            string json = await GetJsonAsync("/api/loyalty/claims/status?branchCode=" + Uri.EscapeDataString(branchCode.Trim()) +
+                "&receiptNo=" + Uri.EscapeDataString(receiptNo.Trim()), _staffToken);
+            var status = ParseReceiptClaimStatus(json);
+            if (!string.Equals(status.BranchCode, branchCode.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(status.ReceiptNo, receiptNo.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new ApiException("Receipt status does not match the requested bill.");
+            return status;
+        }
+
         public async Task<LoyaltyClaimResponse> SubmitLoyaltyClaimAsync(LoyaltyClaimRequest request)
         {
             RequireValidToken();
@@ -493,6 +518,16 @@ namespace SCCRMonPOS
             [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
             [DataMember(Name = "pointsAvailable")] public bool? PointsAvailable { get; set; }
             [DataMember(Name = "pharmacyMedRecordAvailable")] public bool? PharmacyMedRecordAvailable { get; set; }
+        }
+
+        [DataContract] private sealed class ReceiptClaimStatusDto
+        {
+            [DataMember(Name = "ok")] public bool? Ok { get; set; }
+            [DataMember(Name = "claimed")] public bool? Claimed { get; set; }
+            [DataMember(Name = "branchCode")] public string BranchCode { get; set; }
+            [DataMember(Name = "receiptNo")] public string ReceiptNo { get; set; }
+            [DataMember(Name = "claimId")] public string ClaimId { get; set; }
+            [DataMember(Name = "member")] public MemberSearchDto Member { get; set; }
         }
 
         [DataContract] private sealed class LoyaltyClaimResponseDto
@@ -985,6 +1020,20 @@ namespace SCCRMonPOS
                 }
             }
             catch { throw new ApiException("เซิร์ฟเวอร์ส่งข้อมูลสมาชิกที่ไม่ถูกต้อง"); }
+        }
+
+        private static ReceiptClaimStatus ParseReceiptClaimStatus(string json)
+        {
+            var dto = Deserialize<ReceiptClaimStatusDto>(json);
+            if (dto?.Ok != true || !dto.Claimed.HasValue || string.IsNullOrWhiteSpace(dto.BranchCode) ||
+                string.IsNullOrWhiteSpace(dto.ReceiptNo) ||
+                (dto.Claimed.Value && (string.IsNullOrWhiteSpace(dto.ClaimId) || string.IsNullOrWhiteSpace(dto.Member?.Id))))
+                throw new ApiException("Invalid receipt status response.");
+            return new ReceiptClaimStatus {
+                Claimed = dto.Claimed.Value, BranchCode = dto.BranchCode, ReceiptNo = dto.ReceiptNo,
+                ClaimId = dto.ClaimId, MemberId = dto.Member?.Id, MemberName = dto.Member?.DisplayName,
+                MemberCode = dto.Member?.MemberCode
+            };
         }
 
         private static LoyaltyClaimResponse ParseLoyaltyClaimResponse(string json)

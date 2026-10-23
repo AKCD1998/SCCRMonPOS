@@ -42,4 +42,8 @@ jobs:
           msbuild tools/ReceiptScopeCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build-verify/receipt-scope-check/ReceiptScopeCheck.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/ReceiptClaimStatusCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/receipt-claim-status-check/ReceiptClaimStatusCheck.exe
           exit $LASTEXITCODE

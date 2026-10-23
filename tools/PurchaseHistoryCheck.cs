@@ -66,6 +66,7 @@ internal static class PurchaseHistoryCheck
             Field<Button>(form,"_btnSearch").PerformClick();
             var grid=Field<DataGridView>(form,"_dgvResults");
             await Until(()=>grid.Rows.Count>0 && Field<Button>(form,"_btnSearch").Enabled);
+            await (Task)Call(form,"RefreshReceiptClaimStatusAsync");
             Check(Field<MemberSearchResult>(form,"_selectedMember").Id==memberId);
             Check(Field<Button>(form,"_btnConfirm").Enabled);
             Field<Button>(form,"_btnConfirm").PerformClick();
@@ -129,6 +130,9 @@ internal static class PurchaseHistoryCheck
         {
             Call(form,"AddMemberRow",new MemberSearchResult { Id="synthetic",DisplayName="Synthetic",PointsAvailable=true });
             Call(form,"SelectMemberAtRow",0);
+            // Receipt-status HTTP and UI behavior is covered by ReceiptClaimStatusCheck.
+            typeof(MemberClaimForm).GetField("_receiptStatusVerified",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,true);
+            typeof(MemberClaimForm).GetField("_receiptClaimStatus",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,new ReceiptClaimStatus { Claimed=false });
             Check((bool)Call(form,"CanConfirm"));
             var request=(LoyaltyClaimRequest)Call(form,"BuildClaimRequest");
             Check(request.TotalAmount==0m && request.ReceiptTotalAmount==100m && request.Items.Length==1);
