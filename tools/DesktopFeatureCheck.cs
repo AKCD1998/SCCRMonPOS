@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -52,10 +53,11 @@ internal static class DesktopFeatureCheck
                 }
                 RenderPreviews();
                 MemberSelection();
+                CashierWindowSwitching();
             }
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + ",\"stage\":\"" + stage + "\"}"); return 0;
         }
-        catch (Exception error) { Console.WriteLine("{\"ok\":false,\"stage\":\"" + stage + "\",\"type\":\"" + error.GetType().Name + "\"}"); return 1; }
+        catch (Exception error) { Console.WriteLine("{\"ok\":false,\"checks\":" + checks + ",\"stage\":\"" + stage + "\",\"type\":\"" + error.GetType().Name + "\"}"); return 1; }
     }
 
     private static UpdateRelease Metadata(string path, string version = "1.2.0")
@@ -236,6 +238,195 @@ internal static class DesktopFeatureCheck
             var selected = (MemberSearchResult)typeof(MemberClaimForm).GetField("_selectedMember",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
             Check(selected != null && !selected.PointsAvailable);
             Check(!(bool)typeof(MemberClaimForm).GetMethod("CanConfirm",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null));
+        }
+    }
+
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll", EntryPoint = "PostMessageW")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+    private static void CashierWindowSwitching()
+    {
+        using (var guard = new CashierWindowGuard())
+        using (var otherApp = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-12000,-12000) })
+        {
+            stage = "healthy-cashier-stays-on-top";
+            Check(guard.Running);
+            ShowWindow(otherApp.Handle, 4);
+            using (var fixture = new CashierFixture(guard))
+            {
+                Check(fixture.MainCanMinimize);
+                Check(fixture.MainTopMost);
+                Check(fixture.Windows.Any(window => (GetWindowLong(window, -20) & 0x8) != 0));
+                Check(SetWindowPos(otherApp.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x13));
+                Check(IsAbove(fixture.Windows[1], otherApp.Handle));
+                stage = "manual-return-to-sales-while-healthy";
+                ClickBackToSale(guard);
+                Check(WaitFor(() => fixture.Parked, 2000));
+                Check(fixture.Windows.All(window => IsAbove(otherApp.Handle, window)));
+                Check(!IsIconic(otherApp.Handle) && IsWindowVisible(fixture.CustomerSign));
+            }
+            using (var fixture = new CashierFixture(guard, true))
+            {
+                stage = "manual-return-to-sales-while-cashier-is-hung";
+                fixture.Block();
+                ClickBackToSale(guard);
+                Check(WaitFor(() => fixture.Parked, 2000));
+                Check(fixture.Windows.All(window => IsAbove(otherApp.Handle, window)));
+                Check(!IsIconic(otherApp.Handle) && IsWindowVisible(fixture.CustomerSign));
+                fixture.Resume();
+                Thread.Sleep(750); // recovery must not auto-restore over sales
+                Check(fixture.Parked);
+                stage = "explicit-restore-includes-parked-dialogs";
+                fixture.Restore(guard);
+                Check(WaitFor(() => fixture.Windows.All(window => IsWindowVisible(window) && !IsIconic(window)), 2000));
+                Check(fixture.ModalStillOpen);
+                Check(fixture.UnsavedNamePreserved);
+            }
+            using (var fixture = new CashierFixture(guard))
+            {
+                stage = "unresponsive-cashier-parks-automatically";
+                fixture.Block();
+                Check(WaitFor(() => fixture.Parked, 8500));
+                Check(fixture.Windows.All(window => IsAbove(otherApp.Handle, window)));
+                Check(!IsIconic(otherApp.Handle) && IsWindowVisible(fixture.CustomerSign));
+                fixture.Resume();
+                Thread.Sleep(750);
+                Check(fixture.Parked);
+            }
+        }
+        stage = "return-button-is-nonactivating";
+        using (var button = new CashierWindowGuard.BackToSaleButton(() => {}))
+        using (var bitmap = new Bitmap(196, 36))
+        {
+            button.DrawToBitmap(bitmap, new Rectangle(0,0,196,36));
+            bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews","back-to-sale.png"));
+            Check((GetWindowLong(button.Handle, -20) & 0x08000000) != 0);
+        }
+    }
+
+    private static bool WaitFor(Func<bool> condition, int timeout)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        do { if (condition()) return true; Thread.Sleep(20); } while (watch.ElapsedMilliseconds < timeout);
+        return false;
+    }
+    private static bool IsAbove(IntPtr first, IntPtr second)
+    {
+        for (int count = 0; count < 1000 && second != IntPtr.Zero; count++)
+        { second = GetWindow(second, 3); if (second == first) return true; }
+        return false;
+    }
+    private static void ClickBackToSale(CashierWindowGuard guard)
+    {
+        Check(WaitFor(() => guard.ButtonHandle != IntPtr.Zero && IsWindowVisible(guard.ButtonHandle), 2000));
+        PostMessage(guard.ButtonHandle, 0x0201, new IntPtr(1), new IntPtr(655370));
+        Check(PostMessage(guard.ButtonHandle, 0x0202, IntPtr.Zero, new IntPtr(655370)));
+    }
+
+    private sealed class CashierFixture : IDisposable
+    {
+        private sealed class QuietMember : MemberClaimForm { protected override bool ShowWithoutActivation { get { return true; } } }
+        private sealed class QuietRegistration : NewMemberForm
+        {
+            public QuietRegistration() : base(new ApiClient("http://127.0.0.1:1")) { }
+            protected override bool ShowWithoutActivation { get { return true; } }
+        }
+        private sealed class QuietMedical : PharmacyMedRecordForm
+        {
+            public QuietMedical() : base("synthetic") { }
+            protected override bool ShowWithoutActivation { get { return true; } }
+        }
+        private readonly ManualResetEvent ready = new ManualResetEvent(false);
+        private readonly ManualResetEvent blocked = new ManualResetEvent(false);
+        private readonly ManualResetEvent release = new ManualResetEvent(false);
+        private readonly ManualResetEvent resumed = new ManualResetEvent(false);
+        private readonly ManualResetEvent restored = new ManualResetEvent(false);
+        private readonly ManualResetEvent modalReady = new ManualResetEvent(false);
+        private readonly Thread thread;
+        private Form mainForm;
+        private Form modalForm;
+        private ApplicationContext context;
+        private Exception error;
+        public IntPtr[] Windows;
+        public IntPtr CustomerSign;
+        public bool MainCanMinimize;
+        public bool MainTopMost;
+        public bool ModalStillOpen;
+        public bool UnsavedNamePreserved;
+        public bool Parked { get { return Windows.All(window => (GetWindowLong(window, -20) & 0x8) == 0); } }
+
+        public CashierFixture(CashierWindowGuard guard, bool modal = false)
+        {
+            thread = new Thread(() => {
+                try
+                {
+                    using (var main = new QuietMember())
+                    using (var create = new QuietRegistration())
+                    using (var medical = new QuietMedical())
+                    using (var customer = new CustomerQrForm())
+                    using (context = new ApplicationContext())
+                    {
+                        mainForm = main; guard.Protect(main);
+                        if (modal) modalForm = create;
+                        var name = (TextBox)typeof(NewMemberForm).GetField("_txtName",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(create);
+                        name.Text = "Synthetic unsaved member";
+                        create.Owner = main; medical.Owner = create;
+                        var forms = new Form[] { main, create, medical };
+                        Windows = forms.Select(form => {
+                            form.StartPosition = FormStartPosition.Manual;
+                            form.Location = new Point(-12000, -12000);
+                            if (!modal || form != create) form.Show(); // actual styles, no fixture activation
+                            return form.Handle;
+                        }).ToArray();
+                        customer.StartPosition = FormStartPosition.Manual; customer.Location = new Point(-12000,-12000);
+                        customer.Show(); CustomerSign = customer.Handle;
+                        Windows = forms.Select(form => form.Handle).ToArray();
+                        MainCanMinimize = main.ShowInTaskbar && main.MinimizeBox;
+                        MainTopMost = main.TopMost;
+                        if (modal)
+                        {
+                            create.Shown += (s,e) => modalReady.Set();
+                            main.BeginInvoke((Action)(() => create.ShowDialog(main)));
+                        }
+                        ready.Set();
+                        Application.Run(context);
+                    }
+                }
+                catch (Exception ex) { error = ex; ready.Set(); }
+            }) { IsBackground = true };
+            thread.SetApartmentState(ApartmentState.STA); thread.Start();
+            Check(ready.WaitOne(10000));
+            if (error != null) throw error;
+            if (modal) Check(modalReady.WaitOne(2000));
+        }
+        public void Block()
+        {
+            mainForm.BeginInvoke((Action)(() => { blocked.Set(); release.WaitOne(20000); resumed.Set(); }));
+            Check(blocked.WaitOne(2000));
+        }
+        public void Resume() { release.Set(); Check(resumed.WaitOne(2000)); }
+        public void Restore(CashierWindowGuard guard)
+        {
+            mainForm.BeginInvoke((Action)(() => {
+                guard.Restore(mainForm);
+                ModalStillOpen = modalForm != null && modalForm.Modal && !modalForm.IsDisposed;
+                if (ModalStillOpen) UnsavedNamePreserved = ((TextBox)typeof(NewMemberForm).GetField("_txtName",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(modalForm)).Text == "Synthetic unsaved member";
+                restored.Set();
+            }));
+            Check(restored.WaitOne(2000));
+        }
+        public void Dispose()
+        {
+            release.Set();
+            mainForm.BeginInvoke((Action)(() => { modalForm?.Close(); context.ExitThread(); }));
+            Check(thread.Join(5000));
+            ready.Dispose(); blocked.Dispose(); release.Dispose(); resumed.Dispose(); restored.Dispose(); modalReady.Dispose();
+            if (error != null) throw error;
         }
     }
 }

@@ -21,6 +21,7 @@ namespace SCCRMonPOS
         private bool _uiBusy;
         private bool _claimCompleted;
         private Timer _promotionTimer;
+        internal Func<bool> IsParkedForSales;
 
         public void ShowUpdateNotice(string version, Action openUpdates)
         {
@@ -485,6 +486,10 @@ namespace SCCRMonPOS
 
             SetStatus("", false);
 
+            // A completed background load must not open a dialog over sales
+            // after the cashier/independent guard has parked this window.
+            if (IsDisposed || WindowState == FormWindowState.Minimized || IsParkedForSales?.Invoke() == true) return;
+
             var form = new NewMemberForm(_api, detail);
             form.MemberSaved += delegate (MemberSearchResult updated)
             {
@@ -513,7 +518,7 @@ namespace SCCRMonPOS
             form.ShowDialog(this);
         }
 
-        private static bool PromptPin(string prompt, string requiredPin)
+        private bool PromptPin(string prompt, string requiredPin)
         {
             DialogResult result = DialogResult.None;
 
@@ -558,13 +563,15 @@ namespace SCCRMonPOS
             dlg.CancelButton = btnCancel;
             dlg.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
 
-            result = dlg.ShowDialog();
+            // Keep PIN with its owner so the independent guard can park both.
+            result = dlg.ShowDialog(this);
             bool ok = result == DialogResult.OK && txt.Text == requiredPin;
             dlg.Dispose();
 
             if (!ok && result == DialogResult.OK)
             {
                 MessageBox.Show(
+                    this,
                     "รหัสผ่านไม่ถูกต้อง",
                     "SCCRM",
                     MessageBoxButtons.OK,
