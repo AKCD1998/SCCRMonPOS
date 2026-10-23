@@ -67,6 +67,18 @@
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
         "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
       ]
+    },
+    {
+      "nodeId": "noJJCWPrL221CNTRL",
+      "hostname": "POS002",
+      "ipv4": "100.73.76.18",
+      "status": "approved",
+      "receiptBranchCode": "004",
+      "receiptPosCode": "002",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
     }
   ]
 }
