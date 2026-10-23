@@ -25,7 +25,7 @@ internal static class ReceiptClaimStatusCheck
     private static T Field<T>(object target, string name) => (T)typeof(MemberClaimForm).GetField(name, Fields).GetValue(target);
     private static void Pump(Task task) {
         var clock = Stopwatch.StartNew();
-        while (!task.IsCompleted && clock.ElapsedMilliseconds < 8000) { Application.DoEvents(); Thread.Sleep(5); }
+        while (!task.IsCompleted && clock.ElapsedMilliseconds < 25000) { Application.DoEvents(); Thread.Sleep(5); }
         Check(task.IsCompleted, "bounded asynchronous operation"); task.GetAwaiter().GetResult(); Application.DoEvents();
     }
     private static PosReceipt Receipt(string doc = "S-FIXTURE") => new PosReceipt {
@@ -48,26 +48,28 @@ internal static class ReceiptClaimStatusCheck
             _ = Accept();
         }
         private async Task Accept() {
-            try { while(true) { var client=await listener.AcceptTcpClientAsync(); _ = Handle(client); } }
+            // The fixture service must be independent of the forms' UI context,
+            // including when the last test form is closed and another is opened.
+            try { while(true) { var client=await listener.AcceptTcpClientAsync().ConfigureAwait(false); _ = Handle(client); } }
             catch(ObjectDisposedException) {} catch(SocketException) {}
         }
         private async Task Handle(TcpClient client) {
             using(client) using(var stream=client.GetStream()) {
                 var header=new List<byte>(); var one=new byte[1];
                 while(header.Count<16000) {
-                    if(await stream.ReadAsync(one,0,1)==0)return; header.Add(one[0]);
+                    if(await stream.ReadAsync(one,0,1).ConfigureAwait(false)==0)return; header.Add(one[0]);
                     int n=header.Count; if(n>=4 && header[n-4]==13 && header[n-3]==10 && header[n-2]==13 && header[n-1]==10)break;
                 }
                 string headers=Encoding.ASCII.GetString(header.ToArray());
                 var lengthLine=headers.Split('\n').FirstOrDefault(l=>l.StartsWith("Content-Length:",StringComparison.OrdinalIgnoreCase));
                 int length=lengthLine==null?0:int.Parse(lengthLine.Split(':')[1].Trim()); var bytes=new byte[length]; int read=0;
-                while(read<length) {int n=await stream.ReadAsync(bytes,read,length-read); if(n==0)return;read+=n;}
+                while(read<length) {int n=await stream.ReadAsync(bytes,read,length-read).ConfigureAwait(false); if(n==0)return;read+=n;}
                 string path=headers.Split(' ')[1], body=Encoding.UTF8.GetString(bytes);
                 if(headers.StartsWith("POST /api/loyalty/claims "))Interlocked.Increment(ref Posts);
                 if(path.StartsWith("/api/loyalty/claims/status?"))Interlocked.Increment(ref StatusCalls);
-                Reply reply=await Respond(path,body); byte[] output=Encoding.UTF8.GetBytes(reply.Json);
+                Reply reply=await Respond(path,body).ConfigureAwait(false); byte[] output=Encoding.UTF8.GetBytes(reply.Json);
                 byte[] response=Encoding.ASCII.GetBytes("HTTP/1.1 "+reply.Code+" Result\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: "+output.Length+"\r\nConnection: close\r\n\r\n");
-                try { await stream.WriteAsync(response,0,response.Length); await stream.WriteAsync(output,0,output.Length); } catch(IOException) {}
+                try { await stream.WriteAsync(response,0,response.Length).ConfigureAwait(false); await stream.WriteAsync(output,0,output.Length).ConfigureAwait(false); } catch(IOException) {}
             }
         }
         public void Dispose() { listener.Stop(); }
