@@ -33,6 +33,12 @@ internal static class ReceiptScopeCheck
         Check(ReceiptTerminalScope.Resolve(approvedTwo, "", "").PosCode == "002", "POS2 node bound to register 002");
         Check(ReceiptTerminalScope.Resolve(approvedTwo, "001", "001") == null, "copied POS1 config cannot override POS2 assignment");
         Check(ReceiptTerminalScope.Resolve(approvedTwo, "005", "002") == null, "wrong branch config refused");
+        var approved004Two = policy.Devices.Single(d => d.NodeId == "noJJCWPrL221CNTRL");
+        var scope004Two = ReceiptTerminalScope.Resolve(approved004Two, "", "");
+        Check(scope004Two.BranchCode == "004" && scope004Two.PosCode == "002", "branch 004 POS002 node bound to its own register");
+        Check(scope004Two.Contains(Receipt("004", "002")), "branch 004 POS002 accepts its own receipt");
+        Check(!scope004Two.Contains(Receipt("004", "001")) && !scope004Two.Contains(Receipt("001", "002")), "branch 004 POS002 rejects other register and branch");
+        Check(ReceiptTerminalScope.Resolve(approved004Two, "004", "001") == null && ReceiptTerminalScope.Resolve(approved004Two, "001", "002") == null, "copied configuration cannot override branch 004 POS002 assignment");
         Check(ReceiptTerminalScope.Resolve(null, "001", "001") == null, "no verified device has no terminal");
         var unmapped = new ApprovedDevice { Status = "approved" };
         Check(ReceiptTerminalScope.Resolve(unmapped, "", "") == null, "unmapped terminal never watches all receipts");
