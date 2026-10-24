@@ -1,0 +1,6 @@
+'use strict';const test=require('node:test'),assert=require('node:assert/strict');const {validate,DB,MARKER}=require('../config.cjs');const {business,integer}=require('../engine.cjs');
+const valid=()=>({scope:'SCCRM-HQ-SANDBOX-ONLY',intervalMs:30000,sql:{database:DB,marker:MARKER,user:'sccrm_ui_20261024_142127',server:'tcp:127.0.0.1,49800'},pg:{host:'127.0.0.1',port:55443,database:'sccrm_hq_sync_copy',user:'sccrm_sync_worker'}});
+test('copy configuration accepted',()=>assert.equal(validate(valid()).sql.database,DB));
+for(const [name,modify] of [['production SQL',c=>c.sql.database='AdaAcc'],['administrator login',c=>c.sql.user='sa'],['wrong marker',c=>c.sql.marker='x'],['cloud PostgreSQL',c=>c.pg.host='production.supabase.co'],['wrong PG database',c=>c.pg.database='postgres'],['wrong PG role',c=>c.pg.user='postgres'],['busy loop',c=>c.intervalMs=0]])test(name+' rejected',()=>{const c=valid();modify(c);assert.throws(()=>validate(c));});
+test('receipt business identity excludes unrelated manual refs',()=>{assert.equal(business('S2610001001-0054499','manual'),'receipt:S2610001001-0054499');assert.equal(business('unverified source','manual'),'manual');});
+test('fractional and overflow points rejected',()=>{for(const n of [1.5,Infinity,2147483648])assert.throws(()=>integer(n));assert.equal(integer(-5),-5);});

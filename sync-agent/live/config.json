@@ -1,0 +1,1 @@
+{"scope":"SCCRM-HQ-LIVE-MEMBERS","marker":"ef76cc14-1b6b-49c9-8da7-1bfaea3dd92b","pgHost":"aws-1-ap-southeast-1.pooler.supabase.com","sql":{"database":"AdaAcc","user":"sccrm_hq_member_sync","server":"tcp:100.90.166.72,49800"}}

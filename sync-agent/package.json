@@ -1,0 +1,1 @@
+{"name":"sccrm-hq-sync-sandbox","version":"0.1.0","private":true,"description":"Copy-only unattended HQ member and points sync","scripts":{"test":"call \"%npm_node_execpath%\" --test test/*.test.cjs","start":"call \"%npm_node_execpath%\" worker.cjs"},"dependencies":{"pg":"8.16.3"}}

@@ -1,0 +1,369 @@
+{
+  "ok": true,
+  "columns": [
+    {
+      "table_name": "member_profiles",
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "member_code",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 50,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "tier",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": "'bronze'::character varying",
+      "character_maximum_length": 20,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": "true",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "remark",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "member_profiles",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "user_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "amount",
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": 32,
+      "numeric_scale": 0
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "type",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 30,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "reference_id",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": 255,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "note",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": 255,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "created_by",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 255,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "point_ledger",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "full_name",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "phone_number",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": 30,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "email",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": 255,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "password_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "is_verified",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": "false",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "verified_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "dob",
+      "data_type": "date",
+      "udt_name": "date",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "sex",
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": 20,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "remark",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    },
+    {
+      "table_name": "users",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null,
+      "numeric_precision": null,
+      "numeric_scale": null
+    }
+  ],
+  "constraints": [
+    {
+      "table_name": "member_profiles",
+      "conname": "member_profiles_member_code_key",
+      "definition": "UNIQUE (member_code)"
+    },
+    {
+      "table_name": "member_profiles",
+      "conname": "member_profiles_pkey",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "table_name": "member_profiles",
+      "conname": "member_profiles_tier_check",
+      "definition": "CHECK (((tier)::text = ANY ((ARRAY['bronze'::character varying, 'silver'::character varying, 'gold'::character varying])::text[])))"
+    },
+    {
+      "table_name": "member_profiles",
+      "conname": "member_profiles_user_id_fkey",
+      "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    },
+    {
+      "table_name": "member_profiles",
+      "conname": "member_profiles_user_id_key",
+      "definition": "UNIQUE (user_id)"
+    },
+    {
+      "table_name": "point_ledger",
+      "conname": "point_ledger_pkey",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "table_name": "point_ledger",
+      "conname": "point_ledger_type_check",
+      "definition": "CHECK (((type)::text = ANY ((ARRAY['purchase'::character varying, 'redeem'::character varying, 'adjustment'::character varying, 'expire'::character varying, 'promotion'::character varying])::text[])))"
+    },
+    {
+      "table_name": "point_ledger",
+      "conname": "point_ledger_user_id_fkey",
+      "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    },
+    {
+      "table_name": "users",
+      "conname": "users_pkey",
+      "definition": "PRIMARY KEY (id)"
+    }
+  ],
+  "types": [
+    {
+      "type": "purchase",
+      "row_count": 7,
+      "first_at": "2026-10-22T11:52:54.334Z",
+      "last_at": "2026-10-24T02:31:58.173Z"
+    }
+  ],
+  "productionWrites": 0
+}

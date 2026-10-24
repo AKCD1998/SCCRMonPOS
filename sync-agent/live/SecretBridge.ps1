@@ -1,0 +1,8 @@
+param([ValidateSet('Init','Read')][string]$Action='Read')
+$ErrorActionPreference='Stop';Add-Type -AssemblyName System.Security;$root=$PSScriptRoot;$runtime=Join-Path $root 'runtime';$status=Join-Path $root 'status'
+try{
+ $keyFile=Join-Path $runtime 'bootstrap-key.dpapi';$rsa=New-Object Security.Cryptography.RSACryptoServiceProvider 4096;$rsa.PersistKeyInCsp=$false
+ if(-not(Test-Path -LiteralPath $keyFile)){$xml=$rsa.ToXmlString($true);$protected=[Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($xml),$null,[Security.Cryptography.DataProtectionScope]::LocalMachine);[IO.File]::WriteAllBytes($keyFile,$protected);$xml=$null}else{$xml=[Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($keyFile),$null,[Security.Cryptography.DataProtectionScope]::LocalMachine));$rsa.FromXmlString($xml);$xml=$null}
+ if($Action -ceq 'Init'){$p=$rsa.ExportParameters($false);$public=[ordered]@{kty='RSA';n=([Convert]::ToBase64String($p.Modulus).TrimEnd('=').Replace('+','-').Replace('/','_'));e=([Convert]::ToBase64String($p.Exponent).TrimEnd('=').Replace('+','-').Replace('/','_'))};[IO.File]::WriteAllText((Join-Path $status 'bootstrap-public.json'),($public|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding $false));[Console]::WriteLine('READY');exit}
+ $sealed=Join-Path $runtime 'credentials.rsa';if(-not(Test-Path -LiteralPath $sealed)){throw 'CREDENTIALS_PENDING'};$bytes=$rsa.Decrypt([IO.File]::ReadAllBytes($sealed),$true);[Console]::WriteLine([Convert]::ToBase64String($bytes));$bytes=$null
+}catch{[Console]::Error.WriteLine('SECRET_BRIDGE_REFUSED');exit 1}finally{if($rsa){$rsa.Dispose()}}
