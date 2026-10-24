@@ -1,5 +1,7 @@
 # SCCRMonPOS
 
+HQ000 background member/history bridge: [installation and live scope](sync-agent/live/WORK_STATUS.md).
+
 Receipt status: [saved receipt and stored member display](docs/RECEIPT_CLAIM_STATUS.md) (1.3.9).
 
 POS companion agent for FRONT2. Bridges AdaPos HyperMart 4.6006.30 to the SCCRM loyalty backend.

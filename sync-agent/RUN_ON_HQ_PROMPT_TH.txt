@@ -1,0 +1,31 @@
+ช่วยติดตั้งและตรวจ SCCRM HQ Sync รุ่นทดสอบบนเครื่อง SERVER / 000 ตามสิทธิ์ที่ผู้ใช้อนุญาตแล้ว
+
+โฟลเดอร์พร้อมใช้: D:\SCCRM-HQ-SyncSandbox-20261024
+ตัวติดตั้ง: Install-TestService.cmd (รันจากเครื่อง 000 ด้วยสิทธิ์ Administrator; ใช้ Windows PowerShell 32-bit ตาม cmd)
+
+ข้อกำหนดเด็ดขาด:
+- ห้ามลบหรือเขียนทับลูกค้าของ Ada จริง ห้ามแก้ AdaAcc หรือฐานเก่า และห้ามแก้ Supabase จริง
+- ห้ามหยุด ปิด เปลี่ยน หรือควบคุมหน้าจอของ Shopee document automation / chat monitoring / self-healing
+- ไม่ต้องสร้าง reader, trace, Procmon หรือฐานใหม่เพิ่ม ใช้ชุดติดตั้งที่มี
+- ไม่เปิดเผยรหัสผ่านหรือ dump config; ไม่ใช้ sa แทนบัญชีทดสอบ ไม่ลด guard เพื่อให้การทดสอบผ่าน
+- ปรับซ่อมได้เฉพาะโฟลเดอร์นี้และบริการชื่อ SCCRMHQSyncSandbox เท่านั้น ห้ามแก้ firewall, SQL Server service หรือบริการอื่น
+
+แพ็กเกจผ่านทดสอบฝั่งพัฒนาแล้ว 31 integration cases + 10 unit guards ตัวติดตั้งตรวจ hash, แตก runtime ที่คัดลอกตอน PostgreSQL หยุดแล้ว, เปลี่ยนเฉพาะค่าชุดทดสอบให้ใช้ localhost, เก็บรหัส SQL ทดสอบด้วย machine DPAPI และติดตั้งบริการ LocalService แบบ delayed automatic start
+
+ฐาน Ada ที่อนุญาต: SCCRM_UiSandbox_20261024_142127
+marker: 6d42574b-3e90-4d92-aa5d-4c4920a08cbe
+SQL login: sccrm_ui_20261024_142127 (ต้องเปิด AdaAcc ไม่ได้)
+PostgreSQL จำลอง Supabase: localhost:55443 / sccrm_hq_sync_copy / sccrm_sync_worker
+PostgreSQL นี้เป็น cluster ส่วนตัวใน runtime\pgdata ไม่ใช่ Supabase จริงและไม่ใช่บริการ PostgreSQL เดิม
+
+สิ่งที่ต้องทำ:
+1. อ่าน README.md และตรวจโฟลเดอร์/ชื่อเครื่อง จากนั้นรัน Install-TestService.cmd ด้วยสิทธิ์ Administrator หากไม่มีสิทธิ์ให้ผู้ใช้เริ่มตัวติดตั้งเอง ห้ามเปลี่ยนหรือข้าม UAC
+2. รอให้บริการทดสอบ headless จบก่อนเปิด loop ต่อเนื่อง ตรวจ status\verified-on-000.json ต้อง computer=SERVER และผล tests.ok=true หากมี status\service-start-error.json หรือ runtime\verification-blocked.json ให้รายงานสาเหตุและซ่อมเฉพาะชุดนี้ ห้ามบอกว่าติดตั้งผ่านเพราะ SCM Running อย่างเดียว
+3. ตรวจ status\status.json ให้ state=healthy และเวลาอัปเดตใหม่อย่างน้อยสองรอบ (รอบปกติ 30 วินาที) reviews บางรายการเกิดจากการทดสอบชนิดคะแนนที่จงใจให้พัก ไม่ใช่ข้อมูลจริง
+4. ตรวจ account/start mode/PID ของบริการต้องเป็น LocalService / delayed-auto และไม่ต้องมีหน้าจอหรือ Windows login ค้างไว้ ทดสอบ restart เฉพาะ SCCRMHQSyncSandbox หนึ่งครั้ง แล้วรอ healthy อีกสองรอบ ไม่ต้อง reboot เครื่อง
+5. ยืนยัน SQL session ของตัวทำงานเข้าฐานสำเนาด้วย login ทดสอบ และ SELECT สิทธิ์เปิด AdaAcc ต้องเป็น 0 ตรวจสามรหัสเดิมยัง 12/1/0 และผลทดสอบยืนยันลูกค้าเดิม 11 แถวไม่เปลี่ยนทุกคอลัมน์ที่ไม่ใช่ PIN ห้ามอ่าน PIN
+6. ไม่ต้องแตะ GUI Ada หรือ Shopee ตรวจเฉพาะบริการ/ไฟล์สถานะ/ฐานสำเนา การทดสอบเพิ่มข้อมูลเป็นสมาชิกจำลองในสำเนาเท่านั้น
+
+ส่งผลกลับ: ติดตั้งสำเร็จหรือไม่, service account/start mode/PID, ผลทดสอบบน 000, healthy timestamps สองรอบก่อนและหลัง restart, SQL database/login และคะแนน 12/1/0, ข้อจำกัดที่ยังพบ โดยไม่แสดง secrets
+
+เก็บหลักฐานที่ไม่มี secrets เพิ่มในโฟลเดอร์ status ของชุดนี้ได้ เพื่อให้อ่านกลับผ่าน SMB ไม่ต้องแก้สิทธิ์ runtime ให้ Everyone อ่านได้
