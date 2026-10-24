@@ -22,9 +22,21 @@ without deleting/overwriting Ada customers or interfering with Shopee.
 - Worker credentials transferred using RSA encryption; private key protected by
   HQ machine DPAPI and restricted runtime-folder ACL. No plaintext secret file.
 - Website adapter PR97 merged as `49c4c2777c1511af442137360df7148850cc3434`;
-  feature flag saved on the official backend only. Render activation verification
-  pending. Existing web/POS API contracts retained. Backend 51/51 tests passed;
+  feature flag enabled on the official backend only. Render deployment
+  `dep-dbea5qcegpmc73bd8ja0` became live at 12:23:56Z. Existing web/POS API
+  contracts retained. Backend 51/51 tests passed;
   GitHub's full Backend CI is green; copy adapter 12/12 and unit guards 21/21.
+- Live API verification 12:28:12Z: 187 checks passed. The directory contains
+  1,442 rows (native codes and existing online members with approved links);
+  all original 1,438 source identities are present. Five sampled member
+  histories, 61 bills and 157 lines match source owners, SKU, unit code/name,
+  quantity, header totals and Bangkok sale timestamps. Anonymous directory
+  and customer-history reads still return 401.
+- Worker source PR13 merged as `9f7b952882e523e5ee584ceb9aa7a4bfb2fa55e3`.
+  Current non-secret launch evidence is on HQ at
+  `live\status\launch-summary.json`; detailed development reports remain in
+  ignored `live/runtime`. The private development PostgreSQL copy was stopped;
+  the HQ live and original sandbox services were left running.
 
 Runtime reports and raw source data are ignored/private. Do not add them to Git.
 This release reads native points into the mirror but does not enable two-way
