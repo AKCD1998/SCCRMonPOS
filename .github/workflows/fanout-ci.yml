@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: sync-agent/package-lock.json
       - run: npm ci --ignore-scripts
       - name: SC regressions, AR authority, durable queue and publication
-        run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs fanout/operator.test.cjs fanout/sql-adapter.test.cjs member-codes/*.test.cjs
+        run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs fanout/operator.test.cjs fanout/sql-adapter.test.cjs fanout/local-secrets.test.cjs member-codes/*.test.cjs
   windows:
     runs-on: windows-latest
     defaults:
@@ -44,6 +44,12 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Protected UTF-8 cohort round trip
+        working-directory: sync-agent
+        run: node --test fanout/local-secrets.test.cjs
       - name: Parse PowerShell and compile isolated service host
         run: |
           Get-ChildItem sync-agent/fanout/*.ps1,sync-agent/member-codes/*.ps1 | ForEach-Object {

@@ -18,3 +18,6 @@
 - Extend Linux PostgreSQL tests and Windows PowerShell validation in CI.
   Native-copy acceptance, live installation and AdaPos UI checks remain separate
   rollout requirements; this entry does not announce a new POS installer version.
+- Preserve Thai cohort names through the operator's UTF-8/DPAPI pipe. Add a real
+  Windows round-trip regression and an audited metadata-only correction tool
+  which refuses members with assignments and never changes native customers.

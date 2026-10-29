@@ -1,4 +1,4 @@
--- PROPOSAL / NOT APPLIED. Additive authority and publication state only.
+-- Additive authority and publication state; explicit operator provisioning only.
 -- No Ada DML, no old fanout envelope/mapping changes, no public.users changes.
 -- Preserve existing sccrm_fanout SCOPE and idempotency hashes unchanged.
 -- A separately scoped authority importer must verify the exact owned HQ native

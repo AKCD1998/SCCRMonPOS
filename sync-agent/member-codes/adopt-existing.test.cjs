@@ -43,6 +43,7 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
   assert.ok(['127.0.0.1','localhost','[::1]'].includes(url.hostname));
   assert.equal(url.port, '55446');
   assert.match(url.pathname, /^\/sccrm_fanout_test_[a-z0-9_]+$/);
+  fs.writeFileSync(__dirname+'/runtime/adopt-existing-copy-result.json',JSON.stringify({ok:false,state:'running',nativeWrites:0}));
   const { readNative } = require('./operator.cjs');
   const before = new Map(), snapshots = new Map();
   for (const [, code] of COHORT) {
@@ -58,6 +59,10 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
   const authorityUrl = new URL(url); authorityUrl.username = AUTHORITY_ROLE;
   const deliveryUrl = new URL(url); deliveryUrl.username = DELIVERY_ROLE;
   let authority, delivery;
+  let failedSubtests = 0;
+  async function subtest(name, run) {
+    await t.test(name, async () => { try { await run(); } catch (error) { failedSubtests++; throw error; } });
+  }
   const hq = 'copy/hq000/adopt-existing/' + crypto.randomUUID();
   const copyReader = async (action, branch, code, mode) => {
     assert.equal(action, 'customer'); assert.equal(branch, '000'); assert.equal(mode, 'Copy');
@@ -109,7 +114,7 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
     assert.equal(plan.rows.length,6); assert.ok(plan.rows.every(r => r.state==='ready'));
     const args = {db:admin,authorityPool:authority,readNative:copyReader,expectedHqIdentity:hq,
       approvedPlan:plan,approvalReference:'COPY ONLY explicit existing-link adoption acceptance'};
-    await t.test('six canonical AR codes publish with original UUIDs and one old-code alias each',async()=>{
+    await subtest('six canonical AR codes publish with original UUIDs and one old-code alias each',async()=>{
       const result = await adoptExisting(args); assert.equal(result.ok,true); assert.equal(result.branchDeliveryRequested,false);
       for (const [memberId,code] of COHORT) {
         assert.equal((await admin.query('SELECT member_code FROM public.member_profiles WHERE user_id=$1',[memberId])).rows[0].member_code,code);
@@ -117,12 +122,12 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
       }
       assert.deepEqual(await preserved(),baseline);
     });
-    await t.test('repeat application creates no duplicate assignments or aliases',async()=>{
+    await subtest('repeat application creates no duplicate assignments or aliases',async()=>{
       const again=await adoptExisting(args);assert.equal(again.ok,true);assert.ok(again.results.every(r=>r.state==='already-published'));
       for(const table of ['assignments','canonical_codes','aliases']) assert.equal((await admin.query('SELECT count(*)::int n FROM sccrm_member_codes.'+table)).rows[0].n,6);
       assert.equal((await admin.query('SELECT count(*)::int n FROM sccrm_member_codes.migration_events')).rows[0].n,12);
     });
-    await t.test('legacy and AR queues stay empty even when all branch targets are enabled',async()=>{
+    await subtest('legacy and AR queues stay empty even when all branch targets are enabled',async()=>{
       const queue=new AssignmentQueue(delivery,{expectedHqIdentity:hq});
       for(const row of (await admin.query('SELECT assignment_id,deliver_to_branches,authority_reference FROM sccrm_member_codes.assignments')).rows){
         assert.equal(row.deliver_to_branches,false);assert.match(row.authority_reference,/pre-existing approved HQ link/);
@@ -133,7 +138,7 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
       assert.equal((await admin.query('SELECT count(*)::int n FROM sccrm_fanout.jobs')).rows[0].n,0);
       assert.ok((await admin.query('SELECT previous_native_code FROM sccrm_member_codes.canonical_codes')).rows.every(r=>r.previous_native_code===null));
     });
-    await t.test('missing native rows and multiple explicit links are held before publishing',async()=>{
+    await subtest('missing native rows and multiple explicit links are held before publishing',async()=>{
       const missing=await planExisting({db:admin,memberIds:[COHORT[0][0]],readNative:()=>[]});assert.equal(missing.rows[0].code,'ADOPTION_NATIVE_CUSTOMER_NOT_UNIQUE');
       await admin.query("UPDATE ada_history.member_links SET member_id=$1 WHERE source_id='hq000/AdaAcc' AND ada_code=$2",[COHORT[0][0],COHORT[1][1]]);
       try{const duplicate=await planExisting({db:admin,memberIds:[COHORT[0][0]],readNative(){throw Error('must not read');}});
@@ -141,20 +146,21 @@ test('adopt six existing real native customers on isolated PostgreSQL with autho
       }finally{await admin.query("UPDATE ada_history.member_links SET member_id=$1 WHERE source_id='hq000/AdaAcc' AND ada_code=$2",[COHORT[1][0],COHORT[1][1]]);}
       await assert.rejects(adoptExisting({...args,approvedPlan:{...plan,fingerprint:'tampered'}}),/EXPLICIT_READY_ADOPTION_PLAN_REQUIRED/);
     });
-    await t.test('a conflicting current canonical owner cannot be reassigned',async()=>{
+    await subtest('a conflicting current canonical owner cannot be reassigned',async()=>{
       const other=crypto.randomUUID(),code=COHORT[0][1];await seed(other,code,{linked:false});
       await admin.query("UPDATE ada_history.member_links SET member_id=$1 WHERE source_id='hq000/AdaAcc' AND ada_code=$2",[other,code]);
       try{const candidate=await planExisting({db:admin,memberIds:[other],readNative:copyReader});assert.equal(candidate.rows[0].state,'ready');
         await assert.rejects(adoptExisting({...args,approvedPlan:candidate}),/ADOPTION_CANONICAL_OWNER_CONFLICT/);
       }finally{await admin.query("UPDATE ada_history.member_links SET member_id=$1 WHERE source_id='hq000/AdaAcc' AND ada_code=$2",[COHORT[0][0],code]);}
     });
-    await t.test('a duplicate old-code alias owned by another UUID cannot be adopted',async()=>{
+    await subtest('a duplicate old-code alias owned by another UUID cannot be adopted',async()=>{
       const other=COHORT[0][0].slice(0,8)+crypto.randomUUID().slice(8),code='AR000-999999';
       snapshots.set(code,{...structuredClone(before.get(COHORT[0][1])),FTCstCode:code});await seed(other,code);
       const candidate=await planExisting({db:admin,memberIds:[other],readNative:copyReader});assert.equal(candidate.rows[0].state,'ready');
       await assert.rejects(adoptExisting({...args,approvedPlan:candidate}),/ADOPTION_ALIAS_OWNER_CONFLICT/);
       assert.equal((await admin.query('SELECT count(*)::int n FROM sccrm_member_codes.assignments')).rows[0].n,6);
     });
+    assert.equal(failedSubtests,0,'All adoption subtests must pass before recording success');
     assert.deepEqual(await preserved(),baseline);
     for(const [,code] of COHORT) assert.deepEqual(readNative('customer','000',code,'Copy'),[before.get(code)]);
     const proof={ok:true,database,host:'127.0.0.1',port:55446,realCustomers:6,nativeColumnsChecked:101,

@@ -91,7 +91,7 @@ async function adoptExisting({ db, authorityPool, readNative, expectedHqIdentity
     && approvalReference.length > 0 && approvalReference.length <= 180, 'ADOPTION_OPERATOR_APPROVAL_REQUIRED');
   requireValue(authorityPool && typeof authorityPool.query === 'function', 'ADOPTION_AUTHORITY_REQUIRED');
   const actor = (await authorityPool.query(`SELECT current_user actor,session_user session_actor,
-    current_database() database,inet_server_addr()::text host,inet_server_port() port`)).rows[0];
+    current_database() database,host(inet_server_addr()) host,inet_server_port() port`)).rows[0];
   requireValue(actor?.actor === AUTHORITY_ROLE && actor.session_actor === AUTHORITY_ROLE, 'ADOPTION_AUTHORITY_ACTOR_REFUSED');
   if (mode === 'Copy') requireValue(/^sccrm_fanout_test_[a-z0-9_]+$/.test(actor.database)
     && ['127.0.0.1','::1'].includes(actor.host) && actor.port !== 5432, 'ADOPTION_COPY_DATABASE_REQUIRED');
