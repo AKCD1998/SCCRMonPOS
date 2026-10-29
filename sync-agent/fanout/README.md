@@ -40,6 +40,8 @@ The source is polled independently every second. It does not wait for the older
 advanced only after the immutable envelope and jobs are committed. Source UTC
 timestamps and canonical lowercase UUID ordering match SQL Server and Postgres.
 Enabling a later destination catches up only approved persisted source envelopes.
+Missing jobs are reconciled in bounded batches on every worker loop, including
+after a destination is disabled and re-enabled without restarting the service.
 
 Each target has an independent fenced lease. Workers use SKIP LOCKED and unique
 member/target keys. An offline branch retries with exponential backoff up to five
@@ -71,6 +73,16 @@ to ACK measurements were 5.932 / 5.971 / 5.948 / 5.922 seconds respectively.
 These are copy measurements, not a claim of fresh production SLA or native UI
 acceptance. Deployment must separately verify Session 0, an actual service-only
 restart, live SQL readback and the AdaPos member-search screen.
+
+The live permission audit also found a pre-existing Supabase boundary outside
+this add-on: PUBLIC has USAGE on the public schema and EXECUTE on legacy
+SECURITY DEFINER medical-data RPCs without caller checks. The new runtime role
+inherits those existing PUBLIC capabilities, although it receives no direct
+write grants on SCCRM member, points, claims, or purchase-history tables. The
+fanout worker uses only fixed queries against its private schema and never calls
+those RPCs. Do not describe this role as globally unable to mutate unrelated
+legacy data. A separate review must preserve authorized existing callers before
+changing those shared grants; this release does not alter them.
 
 Local core tests: `node --test fanout/engine.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs`.
 The opt-in `engine-postgres.test.cjs` requires a fresh local `sccrm_fanout_test_*`
