@@ -26,6 +26,17 @@ async function scanOnce(source,queue,held={}){
  }
  return {observed:records.length,enqueued,held:heldCount};
 }
+async function catchUpEnabledTargets(queue){
+ // Do not cache "caught up" by target ID. A source can be committed while a
+ // target is disabled, even if disable/re-enable both happen between polls.
+ // Reconcile only missing jobs, at most 100 owned HQ-created envelopes/target.
+ // The durable unique key prevents replay; legacy Ada directory rows are never
+ // scanned here. Current volume is the small native-create journal, not 1,438 old
+ // Ada customers. An enable epoch can optimize this if that journal grows.
+ const enabled=await queue.targets();let enqueued=0;
+ for(const target of enabled)enqueued+=(await queue.enqueueExistingForTarget(target.target_id,{limit:100})).length;
+ return {targets:enabled.length,enqueued,limitPerTarget:100};
+}
 function writeStatus(state){const dir=path.join(ROOT,'status');const temp=path.join(dir,'status.next.json');fs.writeFileSync(temp,JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,...state}));fs.renameSync(temp,path.join(dir,'status.json'));}
 async function run(){
  if(process.env.COMPUTERNAME!=='SERVER')throw Error('FANOUT_HQ_SERVICE_ONLY');
@@ -37,7 +48,7 @@ async function run(){
  const pool=new Pool({connectionString:secret.pgUrl,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8')},max:6,connectionTimeoutMillis:5000,query_timeout:8000,application_name:'SCCRM-HQ-MemberFanout'});
  pool.on('error',()=>{});const queue=new PgQueue(pool);const source=new HqSource({mode:'live',connection:{...config.source,password:secret.sourcePassword}});
  const adapters=Object.fromEntries(config.targets.map(t=>[t.targetId,new NativeReceiver({mode:'live',connection:{...t,targetIdentity:t.databaseIdentity,password:secret.targetPasswords[t.targetId]}})]));
- let lastError=null,lastSourceError=null,lastScan={},engine,lastStatus=0;const caughtUp=new Set();
+ let lastError=null,lastSourceError=null,lastScan={},lastCatchup={},engine,lastStatus=0;
  try{
   await queue.guard();await checkRuntimeRights(pool);
   engine=new FanoutEngine({queue,adapters,pollMs:1000,leaseMs:15000,timeoutMs:7500,onError:r=>{lastError=r;}}).start();
@@ -47,16 +58,12 @@ async function run(){
    else{
     if(engine.stopped)engine.start();
     try{lastScan=await scanOnce(source,queue,config.heldSourceIds||{});lastSourceError=null;}catch(e){lastSourceError=safeCode(e);}
-    for(const target of await queue.targets()){
-     if(caughtUp.has(target.target_id))continue;
-     const jobs=await queue.enqueueExistingForTarget(target.target_id,{limit:100});
-     if(jobs.length<100)caughtUp.add(target.target_id);
-    }
+    lastCatchup=await catchUpEnabledTargets(queue);
    }
-   if(Date.now()-lastStatus>=5000){writeStatus({state:paused?'paused':lastSourceError?'source-retrying':'healthy',lastScan,lastSourceError,lastError,targets:await queue.status(),sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows});lastStatus=Date.now();}
+   if(Date.now()-lastStatus>=5000){writeStatus({state:paused?'paused':lastSourceError?'source-retrying':'healthy',lastScan,lastCatchup,lastSourceError,lastError,targets:await queue.status(),sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows});lastStatus=Date.now();}
    for(let i=0;i<10&&!stopping&&!fs.existsSync(stopFile);i++)await new Promise(resolve=>setTimeout(resolve,100));
   }
  }finally{if(engine)await engine.stop();source.close();for(const adapter of Object.values(adapters))adapter.close();await pool.end();writeStatus({state:'stopped'});}
 }
 if(require.main===module)run().catch(e=>{try{writeStatus({state:'blocked',code:safeCode(e)});}catch{}process.exitCode=1;});
-module.exports={validate,scanOnce,run,FIXTURE_ID};
+module.exports={validate,scanOnce,catchUpEnabledTargets,run,FIXTURE_ID};
