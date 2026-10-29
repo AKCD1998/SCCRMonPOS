@@ -5,7 +5,8 @@ $root=$PSScriptRoot;$sourceRepo=[IO.Path]::GetFullPath((Join-Path $root '..\..')
 $dest='\\100.90.166.72\D\SCCRM-HQ-LiveSync-20261024\fanout'
 $configFile=Join-Path $root 'runtime\config.json';$proofFile=Join-Path $root 'runtime\native-copy-result.json'
 $proof=Get-Content -LiteralPath $proofFile -Raw|ConvertFrom-Json
-if(!$proof.ok -or $proof.productionWrites -ne 0 -or $proof.customerPinRead -ne $false -or $proof.passed -lt 15){throw 'Native copy acceptance required'}
+if(!$proof.ok -or $proof.productionWrites -ne 0 -or $proof.customerPinRead -ne $false -or $proof.passed -lt 80 -or $proof.membershipPolicy.years -ne 100){throw 'Native copy acceptance required'}
+foreach($branch in @('001','003','004','005')){if(!$proof.preservation.$branch.unchanged -or $proof.preservation.$branch.columnsChecked -ne 101 -or $proof.membershipValidityByBranch.$branch.calendarYears -ne 100 -or !$proof.membershipValidityByBranch.$branch.nativeSearchSqlEligible -or !$proof.membershipValidityByBranch.$branch.datesPreservedAfterReplay){throw 'All destination copy validity proofs required'}}
 $config=Get-Content -LiteralPath $configFile -Raw|ConvertFrom-Json
 if($config.scope -cne 'SCCRM-HQ-BRANCH-FANOUT-V1' -or $config.mode -cne 'live'){throw 'Reviewed live configuration required'}
 $dirty=& git -C $sourceRepo status --porcelain --untracked-files=all

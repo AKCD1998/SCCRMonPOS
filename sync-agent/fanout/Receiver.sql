@@ -51,6 +51,12 @@ BEGIN
 
  DECLARE @ExpectedCode varchar(20),@ExistingCode varchar(20),@LockResult int;
  DECLARE @Outcome varchar(20),@Error nvarchar(4000),@Number int;
+ DECLARE @IssueDate datetime,@ExpiryDate datetime;
+ -- The approved SC membership policy is 100 calendar years. AdaPos excludes
+ -- NULL/expired cards from its native lookup, so these are required native
+ -- create fields rather than an inferred UI/default or an unlimited sentinel.
+ SET @IssueDate=DATEADD(day,DATEDIFF(day,0,GETDATE()),0);
+ SET @ExpiryDate=DATEADD(year,100,@IssueDate);
  SET @ExpectedCode='SC-'+UPPER(LEFT(REPLACE(CONVERT(varchar(36),@MemberId),'-',''),16));
  IF CONVERT(varbinary(max),@ExpectedCode)<>CONVERT(varbinary(max),@HqCode)
  BEGIN RAISERROR('FANOUT_HQ_MEMBER_CODE_REFUSED',16,1);RETURN;END;
@@ -87,6 +93,16 @@ BEGIN
      AND CONVERT(varbinary(max),ISNULL(FTCstTel,''))=CONVERT(varbinary(max),@Phone)
      AND CONVERT(varbinary(max),CONVERT(nvarchar(100),ISNULL(FTCstEmail,'')))=CONVERT(varbinary(max),@Email)
    ) BEGIN RAISERROR('FANOUT_NATIVE_PROFILE_CHANGED_REVIEW',16,1);END;
+   IF NOT EXISTS(
+    SELECT 1 FROM dbo.TCNMCst
+    WHERE FTCstCode=@ExistingCode
+     AND FDCstCrdIssue IS NOT NULL AND FDCstCrdExpire IS NOT NULL
+     AND FDCstCrdIssue<=@IssueDate
+     AND FDCstCrdIssue=DATEADD(day,DATEDIFF(day,0,FDCstCrdIssue),0)
+     AND FDCstCrdExpire=DATEADD(year,100,CASE WHEN FDCstCrdIssue<=@IssueDate THEN FDCstCrdIssue ELSE @IssueDate END)
+     AND FDCstCrdExpire>=@IssueDate
+     AND ISNULL(FTCstStaActive,'')<>'2'
+   ) BEGIN RAISERROR('FANOUT_NATIVE_VALIDITY_REVIEW',16,1);END;
    SET @Outcome='existing';
   END
   ELSE
@@ -108,11 +124,12 @@ BEGIN
    -- there is no native UPDATE/DELETE, bill change, or points-transfer operation.
    INSERT dbo.TCNMCst(
     FTCstCode,FTCstName,FTCstTel,FTCstEmail,FTBchCode,FTCstStaActive,
+    FDCstCrdIssue,FDCstCrdExpire,
     FCCstRetPoint,FCCstRetAmt,FCCstWhsPoint,FCCstDailyPoint,
     FDDateIns,FTTimeIns,FTWhoIns,FDDateUpd,FTTimeUpd,FTWhoUpd
    ) VALUES(
     @HqCode,CONVERT(varchar(200),@Name COLLATE Thai_CI_AS),@Phone,
-    CONVERT(varchar(100),@Email COLLATE Thai_CI_AS),'000','1',0,0,0,0,
+    CONVERT(varchar(100),@Email COLLATE Thai_CI_AS),'000','1',@IssueDate,@ExpiryDate,0,0,0,0,
     GETDATE(),CONVERT(varchar(8),GETDATE(),108),'SCCRM_FANOUT_CREATE',
     GETDATE(),CONVERT(varchar(8),GETDATE(),108),'SCCRM_FANOUT_CREATE'
    );
@@ -144,7 +161,12 @@ BEGIN
  SELECT CONVERT(varchar(36),l.member_id) AS member_id,l.hq_code,l.ada_code,
   l.target_identity,CONVERT(nvarchar(200),c.FTCstName) AS profile_name,
   c.FTCstTel AS profile_phone,CONVERT(nvarchar(100),ISNULL(c.FTCstEmail,'')) AS profile_email,
-  l.profile_hash,@Outcome AS outcome,CONVERT(varchar(23),l.received_at,126)+'Z' AS received_at
+  l.profile_hash,@Outcome AS outcome,CONVERT(varchar(23),l.received_at,126)+'Z' AS received_at,
+  CONVERT(varchar(10),c.FDCstCrdIssue,23) AS card_issue_date,
+  CONVERT(varchar(10),c.FDCstCrdExpire,23) AS card_expiry_date,
+  CASE WHEN ISNULL(c.FTCstStaActive,'')<>'2'
+   AND ISNULL(c.FDCstCrdExpire,CONVERT(datetime,'19000101',112))>=@IssueDate
+   THEN 1 ELSE 0 END AS native_lookup_eligible
  FROM dbo.SCCRM_FanoutMemberLink l JOIN dbo.TCNMCst c ON c.FTCstCode=l.ada_code
  WHERE l.member_id=@MemberId;
 END;

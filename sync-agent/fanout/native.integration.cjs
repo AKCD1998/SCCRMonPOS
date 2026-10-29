@@ -25,14 +25,23 @@ async function runNativeIntegration({poolConfig,sourceConfig,targetConfigs,lab=d
  const targets=targetConfigs.map(targetConfig);requireCopy(new Set(targets.map(t=>t.branch)).size===targets.length&&new Set(targets.map(t=>t.targetId)).size===targets.length&&new Set(targets.map(t=>t.databaseIdentity)).size===targets.length,'NATIVE_COPY_TARGET_DUPLICATE');
  const primary=targets.find(t=>t.branch==='005');requireCopy(primary,'NATIVE_COPY_PILOT_TARGET_REQUIRED');const secondary=targets.find(t=>t!==primary);
  const nonce=crypto.randomBytes(6).toString('hex'),tag='native-'+nonce;
- const report={scope:'SCCRM-FANOUT-NATIVE-COPY-ONLY',startedAt:new Date().toISOString(),run:nonce,productionWrites:0,customerPinRead:false,checks:[],fixtures:[],preservation:{},windowsServiceRestartTested:false};
+ const report={scope:'SCCRM-FANOUT-NATIVE-COPY-ONLY',startedAt:new Date().toISOString(),run:nonce,productionWrites:0,customerPinRead:false,checks:[],fixtures:[],preservation:{},windowsServiceRestartTested:false,membershipPolicy:{years:100,basis:'SQL DATEADD(year,100,issue)',eligibilityProof:'AdaPos search SQL-equivalent',actualNativeUiTested:false},membershipValidityByBranch:{}};
  const check=(ok,name,details={})=>{report.checks.push({name,ok:!!ok,...details});requireCopy(ok,'NATIVE_COPY_ASSERTION_FAILED');};
  let pool,q,source;const engines=new Set(),receivers=new Set(),snapshots=[];let stage='copy-preflight',failure;
  function newReceiver(target){const r=new NativeReceiver(target.config);receivers.add(r);return r;}
  function newEngine(adapters){const errors=[];const e=new FanoutEngine({queue:q,adapters,pollMs:1000,timeoutMs:7500,leaseMs:15000,onError:error=>errors.push(error)});e.testErrors=errors;engines.add(e);return e;}
  async function stopEngine(e){await e.stop();engines.delete(e);}
  async function copyQuery(branch,sql,parameters={}){const result=await lab.query(branch,sql,parameters);requireCopy(result.ok&&result.productionWrites===0&&result.database===COPY_PREFIX+branch,'NATIVE_COPY_LAB_ACK_REFUSED');return result.results||[];}
- async function nativeRows(branch,code){return (await copyQuery(branch,'SELECT FTCstCode,CONVERT(nvarchar(200),FTCstName) name,FTCstTel phone,CONVERT(nvarchar(100),ISNULL(FTCstEmail,\'\')) email,FCCstRetPoint,FCCstWhsPoint,FCCstDailyPoint FROM dbo.TCNMCst WHERE FTCstCode=@code',{code}))[0]||[];}
+ async function nativeRows(branch,code){return (await copyQuery(branch,`SELECT FTCstCode,CONVERT(nvarchar(200),FTCstName) name,FTCstTel phone,CONVERT(nvarchar(100),ISNULL(FTCstEmail,'')) email,FCCstRetPoint,FCCstWhsPoint,FCCstDailyPoint,FTCstStaActive active_status,CONVERT(varchar(23),FDCstCrdIssue,126) membership_issue_at,CONVERT(varchar(23),FDCstCrdExpire,126) membership_expires_at,CONVERT(varchar(23),FDDateIns,126) native_created_at,CASE WHEN FDCstCrdIssue IS NOT NULL AND FDCstCrdExpire=DATEADD(year,100,FDCstCrdIssue) THEN 1 ELSE 0 END membership_100_calendar_years,CASE WHEN FDCstCrdIssue IS NOT NULL AND CONVERT(varchar(8),FDCstCrdIssue,112)=CONVERT(varchar(8),FDDateIns,112) THEN 1 ELSE 0 END membership_issue_is_creation_day FROM dbo.TCNMCst WHERE FTCstCode=@code`,{code}))[0]||[];}
+ function validity(row){return {issuedAt:row?.membership_issue_at,expiresAt:row?.membership_expires_at};}
+ function hasCreationValidity(row){return !!row?.membership_issue_at&&!!row.membership_expires_at&&Number(row.membership_100_calendar_years)===1&&Number(row.membership_issue_is_creation_day)===1;}
+ async function nativeSearchRows(branch,code,typedName){
+  // Observed AdaPos search predicate. The real view only LEFT JOINs point
+  // aggregates and has no row filter; use its TCNMCst equivalent in the copy
+  // without selecting/cloning the view's PIN or unrelated columns. This is
+  // SQL eligibility evidence, not a claim of a real native UI search.
+  return (await copyQuery(branch,`SELECT FTCstCode FROM dbo.TCNMCst WHERE FTCstCode=@code AND ISNULL(FTCstStaActive,'')<>'2' AND ISNULL(FDCstCrdExpire,CONVERT(datetime,'19000101',112))>=CONVERT(datetime,CONVERT(varchar(8),GETDATE(),112),112) AND CHARINDEX(@typedName,FTCstName)>0`,{code,typedName}))[0]||[];
+ }
  async function nativeLinks(branch,id){return (await copyQuery(branch,'SELECT CONVERT(varchar(36),member_id) member_id,hq_code,ada_code,target_identity,profile_hash FROM dbo.SCCRM_FanoutMemberLink WHERE member_id=@id',{id}))[0]||[];}
  async function jobs(id){return (await pool.query('SELECT j.*,t.database_identity FROM sccrm_fanout.jobs j JOIN sccrm_fanout.targets t USING(target_id) WHERE member_id=$1 ORDER BY target_id',[id])).rows;}
  async function poll(e,id,predicate,ms=12000){const until=Date.now()+ms;for(;;){await e.tick();const rows=await jobs(id);if(predicate(rows))return rows;if(Date.now()>until)throw Object.assign(Error('NATIVE_COPY_DELIVERY_TIMEOUT'),{code:'NATIVE_COPY_DELIVERY_TIMEOUT',jobStates:rows.map(x=>({target:x.target_id,state:x.state,code:x.last_code}))});await new Promise(resolve=>setTimeout(resolve,30));}}
@@ -73,7 +82,11 @@ async function runNativeIntegration({poolConfig,sourceConfig,targetConfigs,lab=d
    const j=state.find(r=>r.target_id===t.targetId),actual=await nativeRows(t.branch,happy.hqCode),links=await nativeLinks(t.branch,happy.memberId);
    check(actual.length===1&&links.length===1&&String(links[0].member_id).toLowerCase()===happy.memberId&&links[0].ada_code===happy.hqCode&&links[0].target_identity===t.databaseIdentity,'all-branch native exact mapping '+t.branch);
    check(profileHash({name:actual[0].name,phone:actual[0].phone,email:actual[0].email})===profileHash(happy.profile),'all-branch native profile matches '+t.branch);
+   check(hasCreationValidity(actual[0]),'all-branch creation-date membership is exactly100calendar years '+t.branch,{...validity(actual[0]),nativeCreatedAt:actual[0].native_created_at});
+   const searchable=await nativeSearchRows(t.branch,happy.hqCode,happy.profile.name);check(searchable.length===1&&searchable[0].FTCstCode===happy.hqCode,'all-branch actual AdaPos active-expiry-name SQL eligibility '+t.branch);
    const repeated=await initialReceivers.get(t.targetId).receive(j);check(['already_delivered','existing_mapped'].includes(repeated.outcome)&&String(repeated.memberId).toLowerCase()===happy.memberId&&repeated.adaCode===happy.hqCode,'all-branch native replay identity '+t.branch);
+   const replayedValidity=await nativeRows(t.branch,happy.hqCode);check(replayedValidity.length===1&&hasCreationValidity(replayedValidity[0])&&JSON.stringify(validity(replayedValidity[0]))===JSON.stringify(validity(actual[0])),'all-branch replay preserves original membership issue and expiry '+t.branch);
+   report.membershipValidityByBranch[t.branch]={...validity(actual[0]),nativeCreatedAt:actual[0].native_created_at,calendarYears:100,nativeSearchSqlEligible:true,datesPreservedAfterReplay:true};
    const measured=new Date(j.completed_at).getTime()-new Date(happy.hqConfirmedAt).getTime();report.copyLatencyByBranch[t.branch]=measured;check(measured>=-1000&&measured<10000,'all-branch copy commit-to-ack budget '+t.branch,{latencyMs:measured});
   }
   check((await pool.query('SELECT count(*)::int n FROM sccrm_fanout.mappings WHERE member_id=$1',[happy.memberId])).rows[0].n===targets.length,'distinct durable mapping for every target database');
@@ -85,11 +98,14 @@ async function runNativeIntegration({poolConfig,sourceConfig,targetConfigs,lab=d
   stage='lost-ack-and-restart';
   const lost=await makeSource('lostack');await q.enqueueConfirmed(lost,[primary.targetId]);let lose=true;
   e=newEngine({[primary.targetId]:{async receive(j,opts){const r=await primaryReceiver.receive(j,opts);if(lose){lose=false;throw Object.assign(Error('ECONNRESET'),{code:'ECONNRESET'});}return r;}}});
-  await poll(e,lost.memberId,rows=>rows[0]?.state==='retry');await stopEngine(e);check((await nativeRows(primary.branch,lost.hqCode)).length===1,'native commit exists despite lost ack');
+  await poll(e,lost.memberId,rows=>rows[0]?.state==='retry');await stopEngine(e);const committedBeforeRestart=await nativeRows(primary.branch,lost.hqCode);check(committedBeforeRestart.length===1,'native commit exists despite lost ack');
+  check(hasCreationValidity(committedBeforeRestart[0]),'lost-ack committed native row has100calendar-year validity');
   for(const r of receivers)r.close();receivers.clear();source.close();await pool.end();
   pool=new Pool({...poolConfig,ssl:false,max:4,connectionTimeoutMillis:4000,query_timeout:8000,application_name:'SCCRM-Fanout-Native-Copy-Restart'});q=new PgQueue(pool);await q.guard();source=new HqSource(sourceConfig);
   const resumed=newReceiver(primary);e=newEngine({[primary.targetId]:resumed});state=await poll(e,lost.memberId,rows=>rows[0]?.state==='succeeded');await stopEngine(e);
-  check(state[0].attempt_count===2&&(await nativeRows(primary.branch,lost.hqCode)).length===1&&(await nativeLinks(primary.branch,lost.memberId)).length===1,'fresh worker and SQL/PG connections recover lost ack once');
+  const lostAfterRestart=await nativeRows(primary.branch,lost.hqCode);check(state[0].attempt_count===2&&lostAfterRestart.length===1&&(await nativeLinks(primary.branch,lost.memberId)).length===1,'fresh worker and SQL/PG connections recover lost ack once');
+  check(hasCreationValidity(lostAfterRestart[0])&&JSON.stringify(validity(lostAfterRestart[0]))===JSON.stringify(validity(committedBeforeRestart[0])),'lost-ack replay preserves initial issue and expiry exactly');
+  check((await nativeSearchRows(primary.branch,lost.hqCode,lost.profile.name)).length===1,'lost-ack recovered row remains native-search SQL eligible');
   stage='offline-isolation-and-reconnect';
   const offline=await makeSource('offline');await q.enqueueConfirmed(offline,[primary.targetId,secondary.targetId]);let online=false;const secondReceiver=newReceiver(secondary);
   e=newEngine({[primary.targetId]:resumed,[secondary.targetId]:{async receive(j,opts){if(!online)throw Object.assign(Error('TARGET_OFFLINE'),{code:'TARGET_OFFLINE'});return secondReceiver.receive(j,opts);}}});
@@ -102,6 +118,7 @@ async function runNativeIntegration({poolConfig,sourceConfig,targetConfigs,lab=d
    const item=await makeSource(kind);const conflictCode=kind==='code'?item.hqCode:'FX-'+nonce+'-P';
    const conflictingProfile={name:'Existing COPY collision '+nonce,phone:kind==='phone'?item.profile.phone:'098'+String(crypto.randomInt(10000000)).padStart(7,'0'),email:'existing-copy@example.invalid'};
    await seedCollision(primary.branch,{code:conflictCode,profile:conflictingProfile});const before=await nativeRows(primary.branch,conflictCode);
+   if(kind==='phone'){check(before.length===1&&before[0].membership_expires_at==null&&(await nativeSearchRows(primary.branch,conflictCode,conflictingProfile.name)).length===0,'observed AdaPos predicate hides ownCOPYNULL-expiry fixture');}
    const conflictTag=tag+'-'+kind;await lab.snapshot(primary.branch,{copy:true,baselineTag:conflictTag});
    await q.enqueueConfirmed(item,[primary.targetId]);e=newEngine({[primary.targetId]:resumed});state=await poll(e,item.memberId,rows=>rows[0]?.state==='review');await stopEngine(e);
    check(kind==='code'?/CODE_COLLISION/.test(state[0].last_code):/EXISTING_CUSTOMER_REVIEW/.test(state[0].last_code),'native '+kind+' collision held with reason',{code:state[0].last_code});

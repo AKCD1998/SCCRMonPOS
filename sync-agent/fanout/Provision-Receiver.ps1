@@ -84,12 +84,16 @@ try{
  }
 
  # Native compatibility checks read metadata only and never read a PIN value.
- $needed=@('FTCstCode','FTCstName','FTCstTel','FTCstEmail','FTBchCode','FTCstStaActive','FCCstRetPoint','FCCstRetAmt','FCCstWhsPoint','FCCstDailyPoint','FDDateIns','FTTimeIns','FTWhoIns','FDDateUpd','FTTimeUpd','FTWhoUpd')
+ $needed=@('FTCstCode','FTCstName','FTCstTel','FTCstEmail','FTBchCode','FTCstStaActive','FDCstCrdIssue','FDCstCrdExpire','FCCstRetPoint','FCCstRetAmt','FCCstWhsPoint','FCCstDailyPoint','FDDateIns','FTTimeIns','FTWhoIns','FDDateUpd','FTTimeUpd','FTWhoUpd')
  $columns=Rows "SELECT c.name,c.max_length,t.name type_name FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=OBJECT_ID('dbo.TCNMCst','U') AND c.name<>('FTCst'+'Pin')"
  foreach($name in $needed){if(@($columns|Where-Object{$_.name -ceq $name}).Count -ne 1){Refuse 'FANOUT_NATIVE_SCHEMA_UNSUPPORTED'}}
  foreach($pair in @(@('FTCstCode',19),@('FTCstName',200),@('FTCstTel',10),@('FTCstEmail',100),@('FTBchCode',3),@('FTCstStaActive',1),@('FTWhoIns',19),@('FTWhoUpd',19))){
   $column=@($columns|Where-Object{$_.name -ceq $pair[0]})[0]
   if($column.type_name -cne 'varchar' -or ($column.max_length -ne -1 -and $column.max_length -lt $pair[1])){Refuse 'FANOUT_NATIVE_TEXT_SCHEMA_UNSUPPORTED'}
+ }
+ foreach($name in @('FDCstCrdIssue','FDCstCrdExpire')){
+  $column=@($columns|Where-Object{$_.name -ceq $name})[0]
+  if($column.type_name -cne 'datetime' -or $column.max_length -ne 8){Refuse 'FANOUT_NATIVE_CARD_DATE_SCHEMA_UNSUPPORTED'}
  }
  if((Scalar "SELECT COUNT(*) FROM sys.indexes i WHERE i.object_id=OBJECT_ID('dbo.TCNMCst') AND i.is_unique=1 AND i.is_disabled=0 AND EXISTS(SELECT 1 FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal=1 AND c.name='FTCstCode') AND NOT EXISTS(SELECT 1 FROM sys.index_columns ic WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal>1)") -lt 1){Refuse 'FANOUT_NATIVE_CODE_UNIQUENESS_REQUIRED'}
  if((Scalar "SELECT COUNT(*) FROM sys.triggers WHERE parent_id=OBJECT_ID('dbo.TCNMCst') AND is_disabled=0") -gt 0){Refuse 'FANOUT_NATIVE_TRIGGER_REVIEW_REQUIRED'}
