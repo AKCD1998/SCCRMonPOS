@@ -3,6 +3,15 @@ const path=require('node:path');
 const {spawn}=require('node:child_process');
 const readline=require('node:readline');
 const {profileHash,normalizeProfile}=require('./engine.cjs');
+function nativeValidity(row){
+ const fail=()=>{throw Object.assign(Error('ACK_NATIVE_VALIDITY_MISMATCH'),{code:'ACK_NATIVE_VALIDITY_MISMATCH'});};
+ const parse=value=>{if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return fail();const d=new Date(value+'T00:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==value)return fail();return d;};
+ const issue=parse(row.card_issue_date),expiry=parse(row.card_expiry_date),year=issue.getUTCFullYear()+100,month=issue.getUTCMonth();
+ if(year>9999||row.native_lookup_eligible!==1)return fail();
+ const expected=new Date(Date.UTC(year,month,Math.min(issue.getUTCDate(),new Date(Date.UTC(year,month+1,0)).getUTCDate())));
+ if(expiry.getTime()!==expected.getTime())return fail();
+ return {cardIssueDate:row.card_issue_date,cardExpiryDate:row.card_expiry_date,nativeLookupEligible:true};
+}
 class SqlRpc {
  constructor({mode,role,connection,timeoutMs=7000}){
   this.sequence=0;this.pending=new Map();this.timeoutMs=timeoutMs;this.closed=false;
@@ -45,9 +54,10 @@ class NativeReceiver {
   // SQL 2008 cannot calculate SHA256. Hash its actual returned native fields,
   // rather than trusting the opaque digest that the sender supplied earlier.
   if(profileHash(profile)!==r.profile_hash)throw Object.assign(Error('ACK_PROFILE_MISMATCH'),{code:'ACK_PROFILE_MISMATCH'});
-  return {memberId:r.member_id,hqCode:r.hq_code,adaCode:r.ada_code,targetIdentity:r.target_identity,profile,profileHash:r.profile_hash,outcome:r.outcome==='existing'?'already_delivered':r.outcome,receivedAt:r.received_at};
+  const validity=nativeValidity(r);
+  return {memberId:r.member_id,hqCode:r.hq_code,adaCode:r.ada_code,targetIdentity:r.target_identity,profile,profileHash:r.profile_hash,outcome:r.outcome==='existing'?'already_delivered':r.outcome,receivedAt:r.received_at,...validity};
  }catch(e){if(this.rpc?.closed||/OFFLINE|TIMEOUT|CONNECTION|RPC_PROCESS/.test(e.code||'')){this.rpc?.close();this.rpc=null;}throw e;}}
  async identity(){if(!this.rpc||this.rpc.closed)this.rpc=new SqlRpc({...this.config,role:'receiver'});return this.rpc.query('identity');}
  close(){this.rpc?.close();this.rpc=null;}
 }
-module.exports={SqlRpc,HqSource,NativeReceiver};
+module.exports={SqlRpc,HqSource,NativeReceiver,nativeValidity};

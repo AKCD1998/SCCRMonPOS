@@ -28,7 +28,7 @@ function pgAdmin(){
  const url=new URL(env.SC_OFFICIAL_SUPABASE_DATABASE_URL);if(!url.hostname.endsWith('.pooler.supabase.com')||url.port!=='5432'||url.pathname!=='/postgres')throw Error('EXISTING_SUPABASE_ENDPOINT_REQUIRED');
  return {url,ca:fs.readFileSync(path.join(ROOT,'../live/supabase-ca.crt'),'utf8')};
 }
-function requireCopyProof(){const p=JSON.parse(fs.readFileSync(path.join(RUNTIME,'native-copy-result.json'),'utf8'));if(!p.ok||p.scope!=='SCCRM-FANOUT-NATIVE-COPY-ONLY'||p.productionWrites!==0||p.customerPinRead!==false||p.passed<15||!p.preservation['005']?.unchanged)throw Error('NATIVE_COPY_ACCEPTANCE_REQUIRED');return p;}
+function requireCopyProof(){const p=JSON.parse(fs.readFileSync(path.join(RUNTIME,'native-copy-result.json'),'utf8'));if(!p.ok||p.scope!=='SCCRM-FANOUT-NATIVE-COPY-ONLY'||p.productionWrites!==0||p.customerPinRead!==false||p.passed<80||p.membershipPolicy?.years!==100||!BRANCHES.every(b=>p.preservation[b]?.unchanged&&p.preservation[b]?.columnsChecked===101&&p.membershipValidityByBranch?.[b]?.calendarYears===100&&p.membershipValidityByBranch[b].nativeSearchSqlEligible===true&&p.membershipValidityByBranch[b].datesPreservedAfterReplay===true))throw Error('NATIVE_COPY_ACCEPTANCE_REQUIRED');return p;}
 async function provisionCopy(){
  const s=state();if(!s.copy){s.copy={nonce:crypto.randomBytes(5).toString('hex'),sourcePassword:password(),targetPasswords:Object.fromEntries(BRANCHES.map(b=>[b,password()])),identities:Object.fromEntries(BRANCHES.map(b=>[b,'copy'+b+'/SERVER.SQLEXPRESS/SCCRM_FanoutCopy_20261029_'+b+'/'+crypto.randomUUID()]))};save(s);}
  const admin=readAdmin('000'),copy=s.copy,results=[];
@@ -73,7 +73,7 @@ async function provisionLive(branches=['005']){
  const report={ok:true,scope:'LIVE_CREATE_ONLY_PROVISIONED',targets:targets.map(t=>({branch:t.branchCode,identity:t.databaseIdentity})),enabled:false,results,originalCustomerWrites:0};fs.writeFileSync(path.join(RUNTIME,'live-provision-result.json'),JSON.stringify(report,null,2));return report;
 }
 async function setEnabled(branch,enabled){
- requireCopyProof();if(!BRANCHES.includes(branch))throw Error('BRANCH_REFUSED');const s=state(),a=pgAdmin();if(!s.live?.targets[branch])throw Error('TARGET_NOT_PROVISIONED');
+ if(enabled)requireCopyProof();if(!BRANCHES.includes(branch))throw Error('BRANCH_REFUSED');const s=state(),a=pgAdmin();if(!s.live?.targets[branch])throw Error('TARGET_NOT_PROVISIONED');
  const admin=new Client({connectionString:a.url.href,ssl:{ca:a.ca,rejectUnauthorized:true},connectionTimeoutMillis:8000});await admin.connect();
  try{const result=await admin.query('UPDATE sccrm_fanout.targets SET enabled=$2 WHERE target_id=$1 AND database_identity=$3 RETURNING target_id,database_identity,enabled',['branch'+branch,enabled,s.live.targets[branch].databaseIdentity]);if(result.rows.length!==1)throw Error('TARGET_ENABLE_IDENTITY_REFUSED');return {ok:true,target:result.rows[0]};}finally{await admin.end();}
 }
@@ -86,6 +86,16 @@ async function transferSecrets(){
  fs.writeFileSync(path.join(dest,'runtime/credentials.hybrid.json'),JSON.stringify(packet));return {ok:true,scope:SCOPE,hybridEncrypted:true,plaintextSecretsTransferred:false};
 }
 async function status(){const s=state(),a=pgAdmin();if(!s.live)throw Error('LIVE_QUEUE_NOT_PREPARED');const p=new Pool({connectionString:s.live.pgUrl,ssl:{ca:a.ca,rejectUnauthorized:true},max:1});try{return {ok:true,targets:await new PgQueue(p).status(),jobs:(await p.query('SELECT target_id,member_id,hq_code,state,attempt_count,last_code,hq_created_at,queued_at,completed_at FROM sccrm_fanout.jobs ORDER BY id')).rows,sources:(await p.query('SELECT member_id,hq_code,state,last_code FROM sccrm_fanout.sources ORDER BY hq_created_at,member_id')).rows};}finally{await p.end();}}
+async function repairPilotValidity(){
+ requireCopyProof();const proof=JSON.parse(fs.readFileSync(path.join(RUNTIME,'validity-repair-copy-result.json'),'utf8'));
+ if(!proof.ok||proof.scope!=='SCCRM-VALIDITY-REPAIR-COPY-ONLY'||proof.policy!=='calendar-years-100'||proof.productionWrites!==0||proof.pinRead!==false||proof.passed<13||!proof.preservation?.unchanged)throw Error('VALIDITY_REPAIR_COPY_PROOF_REQUIRED');
+ const cohort=JSON.parse(fs.readFileSync(path.join(RUNTIME,'pilot-validity-cohort.json'),'utf8'));
+ if(cohort.scope!=='SCCRM-005-OWNED-PILOT-VALIDITY'||cohort.policy!=='calendar-years-100'||!Array.isArray(cohort.memberIds)||cohort.memberIds.length!==2||new Set(cohort.memberIds).size!==2||cohort.memberIds.some(id=>!/^[a-f0-9-]{36}$/.test(id)))throw Error('VALIDITY_REPAIR_COHORT_REFUSED');
+ const s=state(),t=s.live?.targets?.['005'],a=pgAdmin();if(!t)throw Error('PILOT_NOT_PROVISIONED');
+ const pool=new Pool({connectionString:s.live.pgUrl,ssl:{ca:a.ca,rejectUnauthorized:true},max:1});let members;
+ try{const r=await pool.query("SELECT j.member_id,j.hq_code,j.profile_hash FROM sccrm_fanout.jobs j JOIN sccrm_fanout.mappings m ON m.target_id=j.target_id AND m.member_id=j.member_id AND m.ada_code=j.hq_code AND m.profile_hash=j.profile_hash JOIN sccrm_fanout.targets t ON t.target_id=j.target_id AND t.database_identity=m.database_identity WHERE j.target_id='branch005' AND t.enabled=false AND t.database_identity=$2 AND j.state='succeeded' AND j.member_id=ANY($1::uuid[]) ORDER BY j.member_id",[cohort.memberIds,t.databaseIdentity]);if(r.rows.length!==2)throw Error('VALIDITY_PILOT_MAPPING_REVIEW');members=r.rows.map(r=>({memberId:r.member_id,adaCode:r.hq_code,profileHash:r.profile_hash}));}finally{await pool.end();}
+ const admin=readAdmin('005');try{return require('./validity-repair.cjs').repairOwnedValidity({mode:'Live',target:{identity:t.databaseIdentity,server:t.server,machine:t.machine,database:t.database,branch:'005'},admin,members,pilotApproved:true});}finally{admin.password='';}
+}
 if(require.main===module)(async()=>{
  let answer;const [command,...branches]=process.argv.slice(2);
  if(command==='provision-copy')answer=await provisionCopy();
@@ -93,7 +103,8 @@ if(require.main===module)(async()=>{
  else if(command==='provision-live')answer=await provisionLive(branches.length?branches:['005']);
  else if(command==='enable'||command==='disable')answer=await setEnabled(branches[0],command==='enable');
  else if(command==='transfer-secrets')answer=await transferSecrets();
+ else if(command==='repair-pilot-validity')answer=await repairPilotValidity();
  else if(command==='status')answer=await status();else throw Error('EXPLICIT_FANOUT_OPERATOR_COMMAND_REQUIRED');
  console.log(JSON.stringify(answer));
 })().catch(error=>{console.error(JSON.stringify(error.report||{ok:false,stage,code:error.code||(/^[A-Z_]+$/.test(error.message)?error.message:'FANOUT_OPERATOR_FAILED'),sqlNumber:error.sqlNumber}));process.exitCode=1;});
-module.exports={ROOT,RUNTIME,NATIVE_MARKER,BRANCHES,nativeProvision,pgAdmin,provisionCopy,runCopy,provisionLive,setEnabled,transferSecrets,status};
+module.exports={ROOT,RUNTIME,NATIVE_MARKER,BRANCHES,nativeProvision,pgAdmin,provisionCopy,runCopy,provisionLive,setEnabled,transferSecrets,status,repairPilotValidity};

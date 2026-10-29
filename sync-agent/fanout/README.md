@@ -27,11 +27,28 @@ own Windows job object. Stopping this service affects no other service/process.
   and member-link table, and one static receiver procedure. Native direct
   SELECT/INSERT/UPDATE/DELETE/ALTER and customer PIN access are denied.
 - The procedure creates only a previously absent customer, with HQ home branch
-  000, zero opening points, and whitelisted profile fields. It never rewrites,
+  000, zero opening points, whitelisted profile fields and a card issued on the
+  local creation date with validity of 100 calendar years, explicitly approved
+  on 29 October 2026. It never rewrites,
   deletes or renumbers a native customer, changes bills, or transfers points.
 - A pre-existing code/phone or changed source/native profile goes to review.
   Phone matching never creates a mapping. Existing AR codes need explicit human
   selection; this automatic create-only path cannot approve or merge them.
+
+The live pilot exposed an additional native prerequisite: AdaPos searches
+`vTCNMCst` with `ISNULL(FDCstCrdExpire,'1900/01/01') >= today`. A successful table
+insert with NULL expiry is insufficient. The receiver and independent ACK
+validator now require searchable 100-year validity. Copies exercise the actual
+observed active/expiry/name predicate, including the NULL-expiry failure.
+
+The explicit `repair-pilot-validity` operator command is separate from the
+worker. It accepts only two privately approved, already-mapped 005 creations
+owned by this receiver, with exact unchanged profile/fingerprint and both dates
+missing. It populates only issue/expiry using the original creation day and
+verifies the other 99 non-PIN columns remain identical. Existing/partial dates,
+changed profiles and ordinary pre-existing Ada codes are rejected. It is not a
+bulk update or background renewal. Its copy acceptance and private cohort file
+are required before invocation.
 
 ## Delivery and recovery
 
@@ -64,12 +81,14 @@ backs up/restores production or opens MDF/LDF files. A copy-only database user
 cannot access AdaAcc. Original sources and copies have independent typed row
 hash baselines, with exact original-code preservation checked after tests.
 
-On 29 October 2026, core queue tests passed 22/22; native copies passed 70/70.
+On 29 October 2026, core queue tests passed 22/22; native copies passed 86/86,
+including native card validity and the observed AdaPos search predicate. The
+separate guarded validity-repair copy suite passed 13/13.
 Actual receiver create/replay and mapping were exercised for 001/003/004/005,
 including offline/reconnect, lost acknowledgement, worker restart, duplicate
 phone, code collision, changed native name, lease expiry and stale acknowledgement.
 All original copied rows retained all 101 non-PIN columns. The copy source-commit
-to ACK measurements were 5.932 / 5.971 / 5.948 / 5.922 seconds respectively.
+to ACK measurements were 6.973 / 7.003 / 6.972 / 7.040 seconds respectively.
 These are copy measurements, not a claim of fresh production SLA or native UI
 acceptance. Deployment must separately verify Session 0, an actual service-only
 restart, live SQL readback and the AdaPos member-search screen.

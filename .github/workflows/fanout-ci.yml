@@ -34,7 +34,7 @@ jobs:
           cache: npm
           cache-dependency-path: sync-agent/package-lock.json
       - run: npm ci --ignore-scripts
-      - run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs
+      - run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs fanout/sql-adapter.test.cjs
   windows:
     runs-on: windows-latest
     defaults:
