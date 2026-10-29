@@ -1,5 +1,12 @@
 # SCCRMonPOS Loyalty Safeguard: Drug Exclusion
 
+> Historical implementation record, superseded for earning on 2026-10-29.
+> Management instructed that medicine purchases may earn member points after
+> its consultation with the provincial public-health office. Version 1.3.10
+> and the central backend include medicines in earning totals. This is an
+> operator policy record, not independent legal advice or gift/redemption
+> authorization. Product classification and unknown-product checks remain.
+
 วันที่อัปเดต: 2026-05-17
 
 ## 1) ทำไมต้องมีเอกสารนี้

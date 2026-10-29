@@ -307,7 +307,7 @@ namespace SCCRMonPOS
 
                 _chkEligibleSubtotalConfirmed = new CheckBox
                 {
-                    Text = "ยืนยันว่า ยอดข้างต้นไม่รวมยา/สินค้าที่ไม่ร่วมสะสมแต้ม",
+                    Text = "ยืนยันยอดซื้อที่ร่วมสะสมแต้ม (รวมยา)",
                     Location = new Point(15, 348),
                     Size = new Size(405, 20),
                     AutoSize = false
@@ -534,17 +534,11 @@ namespace SCCRMonPOS
             _lvReceiptItems.Items.Clear();
             foreach (PosReceiptItem item in _posReceipt.Items)
             {
-                bool excluded = (item.ProductName ?? "").StartsWith("เภสัช", StringComparison.Ordinal);
                 string name = item.ProductName ?? item.ProductCode ?? "-";
                 if (name.Length > 30) name = name.Substring(0, 27) + "...";
                 var row = new ListViewItem(name);
                 row.SubItems.Add(item.Qty.ToString("0.##", CultureInfo.InvariantCulture));
                 row.SubItems.Add(item.NetAmount.ToString("N2", CultureInfo.InvariantCulture));
-                if (excluded)
-                {
-                    row.ForeColor = Color.Firebrick;
-                    row.BackColor = Color.FromArgb(255, 235, 235);
-                }
                 _lvReceiptItems.Items.Add(row);
             }
         }
@@ -568,18 +562,15 @@ namespace SCCRMonPOS
             return (int)Math.Floor(bill / _bahtPerPoint);
         }
 
-        // Sums NetAmount only for items whose name does NOT start with "เภสัช".
-        // Per พรบ.ยา พ.ศ.2510, pharmaceutical products are prohibited from
-        // any sales promotion, including loyalty points.
+        // Purchase-point policy approved by the operator on 2026-10-29.
+        // Include medicine line totals; this does not dispense gifts or rewards.
         private static decimal CalcEligibleTotal(PosReceipt receipt)
         {
             if (receipt?.Items == null) return 0m;
             decimal total = 0m;
             foreach (PosReceiptItem item in receipt.Items)
             {
-                string name = item.ProductName ?? "";
-                if (!name.StartsWith("เภสัช", StringComparison.Ordinal))
-                    total += item.NetAmount;
+                total += item.NetAmount;
             }
             return total;
         }
@@ -977,7 +968,7 @@ namespace SCCRMonPOS
             if (result == null) return "ไม่พบข้อมูล";
             if (result.Eligible) return "ร่วมสะสมแต้ม";
             if (string.Equals(result.Reason, "medicine_blocked", StringComparison.OrdinalIgnoreCase))
-                return "ยา - ไม่ร่วมสะสม";
+                return "ยา - รออัปเดตกติกาส่วนกลาง";
             if (string.Equals(result.Reason, "unknown_product_kind", StringComparison.OrdinalIgnoreCase))
                 return "ยังไม่จัดประเภท";
             return "ไม่ร่วมสะสม";

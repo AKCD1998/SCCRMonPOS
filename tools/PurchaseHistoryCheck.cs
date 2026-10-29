@@ -73,7 +73,7 @@ internal static class PurchaseHistoryCheck
             Check(!grid.Enabled && !Field<Button>(form,"_btnConfirm").Enabled);
             await Until(()=>Field<Label>(form,"_lblStatus").Text.StartsWith("บันทึกบิลสำเร็จ",StringComparison.Ordinal));
             Check(!Field<Button>(form,"_btnConfirm").Enabled);
-            if(drugOnly)Check(Field<Label>(form,"_lblStatus").Text.Contains("ได้รับ 0 แต้ม"));
+            if(drugOnly)Check(Field<Label>(form,"_lblStatus").Text.Contains("ได้รับ 4 แต้ม"));
             form.Close();
         }
     }
@@ -98,7 +98,7 @@ internal static class PurchaseHistoryCheck
             var mixed=grid.Rows.Cast<DataGridViewRow>().Single(r=>((PurchaseRecord)r.Tag).ReceiptNo==input.ReceiptPrefix+"MIXED");
             grid.ClearSelection();mixed.Selected=true;
             var bill=(PurchaseRecord)mixed.Tag;
-            Check(bill.TotalAmount==340m && bill.EligibleAmount==250m && bill.Items.Length==2);
+            Check(bill.TotalAmount==340m && bill.EligibleAmount==350m && bill.Items.Length==2);
             Check(bill.Items[0].Seq==3 && bill.Items[0].Barcode=="SYNTHETIC-BC" && bill.Items[0].LineDiscount==10m && bill.Items[0].PromotionCode=="TEST-PROMO");
             Check(Field<ListView>(form,"_lvItems").Items.Count==2);
             Check(Field<Label>(form,"_lblReceipt").Text.Contains("TEST-POS"));
@@ -122,8 +122,18 @@ internal static class PurchaseHistoryCheck
     }
     private static void Offline()
     {
-        stage="offline-zero-points-and-return-guard";
+        stage="offline-medicine-points-and-return-guard";
         var input=new Input {BranchCode="TEST_FIXTURE",ReceiptPrefix="HISTORYTEST-"};
+        // Both desktop receipt paths must use the same medicine-inclusive basis.
+        var mixed=Receipt(input,"MIXED",false);
+        using(var manual=new MemberPointForm(null,new ApiClient("http://127.0.0.1:1"),null,null,null,false,mixed))
+        {
+            var calc=typeof(MemberPointForm).GetMethod("CalcEligibleTotal",BindingFlags.Static|BindingFlags.NonPublic);
+            Check((decimal)calc.Invoke(null,new object[]{mixed})==350m);
+            Call(manual,"PopulateReceiptItems");
+            Check(Field<ListView>(manual,"_lvReceiptItems").Items.Count==2);
+            Check(Field<ListView>(manual,"_lvReceiptItems").Items[1].ForeColor==Field<ListView>(manual,"_lvReceiptItems").Items[0].ForeColor);
+        }
         using(var display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-history-offline")))
         using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope(input.BranchCode,"TEST-POS")))
         using(var form=new MemberClaimForm(new ApiClient("http://127.0.0.1:1"),watcher,25,"synthetic",Receipt(input,"ZERO",true),display))
@@ -135,7 +145,7 @@ internal static class PurchaseHistoryCheck
             typeof(MemberClaimForm).GetField("_receiptClaimStatus",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,new ReceiptClaimStatus { Claimed=false });
             Check((bool)Call(form,"CanConfirm"));
             var request=(LoyaltyClaimRequest)Call(form,"BuildClaimRequest");
-            Check(request.TotalAmount==0m && request.ReceiptTotalAmount==100m && request.Items.Length==1);
+            Check(request.TotalAmount==100m && request.ReceiptTotalAmount==100m && request.Items.Length==1);
             Check(request.Items[0].UnitCode=="BOX" && request.Items[0].UnitName=="กล่อง");
             string json=(string)typeof(ApiClient).GetMethod("BuildLoyaltyClaimJson",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{request});
             Check(json.Contains("\"receiptTotalAmount\":100") && json.Contains("SYNTHETIC-DRUG"));
