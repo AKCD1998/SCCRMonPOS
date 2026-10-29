@@ -1,5 +1,11 @@
 # HQ-to-branch membership fanout
 
+The optional [Ada-assigned AR extension](../member-codes/README.md) runs beside
+this original SC queue. It preserves existing SC envelopes and mappings, adds a
+separate authority/queue and publishes the assigned code without changing the
+SCCRM UUID. Its explicitly approved two-customer migration is a separate guarded
+operator action, outside the ordinary create-only SC receiver described below.
+
 This independent add-on consumes only the committed `SCCRM_LiveMemberLink`
 creation log on HQ000. It never scans the legacy customer directory for outbound
 delivery, changes points, reads customer PINs, replaces the current live worker,

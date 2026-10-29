@@ -8,6 +8,13 @@ const {HqSource,NativeReceiver}=require('./sql-adapter.cjs');
 const {machineSecrets}=require('./secrets.cjs');
 const ROOT=__dirname;
 const FIXTURE_ID='bf0e4513-a72d-4c83-9b17-afff6779cf9b';
+function memberCodeService(){try{return require('../member-codes/service.cjs');}catch(error){if(error.code==='MODULE_NOT_FOUND')throw Error('MEMBER_CODE_RUNTIME_NOT_INSTALLED');throw error;}}
+function validateMemberCodes(config,secrets){
+ if(config.memberCodes===undefined)return false;
+ if(!config.memberCodes||typeof config.memberCodes!=='object'||Array.isArray(config.memberCodes)||typeof config.memberCodes.enabled!=='boolean')throw Error('MEMBER_CODE_OPTION_REFUSED');
+ if(!config.memberCodes.enabled)return false;
+ memberCodeService().validateServiceConfig(config.memberCodes,secrets.memberCodes,{pgHost:config.pgHost,targets:config.targets});return true;
+}
 function validate(config,secrets){
  if(config.scope!==SCOPE||config.marker!==MARKER||config.mode!=='live'||config.source.machine!=='SERVER'||config.source.database!=='AdaAcc'||config.source.user!=='sccrm_member_fanout_source'||config.source.server!=='tcp:127.0.0.1,49800')throw Error('FANOUT_LIVE_SOURCE_REFUSED');
  const url=new URL(secrets.pgUrl);if(url.hostname!==config.pgHost||!url.hostname.endsWith('.pooler.supabase.com')||url.port!=='5432'||url.pathname!=='/postgres'||!decodeURIComponent(url.username).startsWith(ROLE+'.'))throw Error('FANOUT_LIVE_QUEUE_REFUSED');
@@ -17,7 +24,7 @@ function validate(config,secrets){
   if(t.server!==d.peer+'\\SQLEXPRESS'&&!new RegExp('^tcp:'+d.peer.replaceAll('.','\\.')+',[0-9]{4,5}$').test(t.server))throw Error('FANOUT_TARGET_ENDPOINT_REFUSED');
   if(!t.databaseIdentity.startsWith('branch'+t.branchCode+'/'+d.machine+'.SQLEXPRESS/AdaAcc/'))throw Error('FANOUT_TARGET_BINDING_REFUSED');
  }
- if(config.heldSourceIds?.[FIXTURE_ID]!=='SYNTHETIC_SOURCE_FIXTURE_HELD')throw Error('KNOWN_SYNTHETIC_SOURCE_MUST_BE_HELD');return config;
+ if(config.heldSourceIds?.[FIXTURE_ID]!=='SYNTHETIC_SOURCE_FIXTURE_HELD')throw Error('KNOWN_SYNTHETIC_SOURCE_MUST_BE_HELD');validateMemberCodes(config,secrets);return config;
 }
 async function scanOnce(source,queue,held={}){
  const checkpoint=await queue.getSourceCheckpoint();const records=await source.read(checkpoint);let enqueued=0,heldCount=0;
@@ -38,6 +45,17 @@ async function catchUpEnabledTargets(queue){
  return {targets:enabled.length,enqueued,limitPerTarget:100};
 }
 function writeStatus(state){const dir=path.join(ROOT,'status');const temp=path.join(dir,'status.next.json');fs.writeFileSync(temp,JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,...state}));fs.renameSync(temp,path.join(dir,'status.json'));}
+function createLifecycle(engine,codeResources){
+ let codeRunning=false;return {async sync(paused){if(paused){const tasks=[];if(!engine.stopped)tasks.push(engine.stop());if(codeRunning)tasks.push(codeResources.runtime.stop().finally(()=>{codeRunning=false;}));const results=await Promise.allSettled(tasks);const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;}else{if(engine.stopped)engine.start();if(codeResources&&!codeRunning){codeResources.runtime.start();codeRunning=true;}}}};
+}
+async function shutdownResources({engine,codeResources,source,adapters,pool}){
+ let failure;const attempt=async fn=>{try{await fn();}catch(error){failure||=error;}};
+ if(engine)await attempt(()=>engine.stop());
+ if(codeResources)await attempt(()=>codeResources.close());
+ if(source)await attempt(()=>source.close());
+ for(const adapter of Object.values(adapters||{}))await attempt(()=>adapter.close());
+ if(pool)await attempt(()=>pool.end());if(failure)throw failure;
+}
 async function run(){
  if(process.env.COMPUTERNAME!=='SERVER')throw Error('FANOUT_HQ_SERVICE_ONLY');
  const config=JSON.parse(fs.readFileSync(path.join(ROOT,'config.json'),'utf8'));machineSecrets('Init');writeStatus({state:'waiting-credentials'});
@@ -45,25 +63,26 @@ async function run(){
  const stopFile=path.join(ROOT,'runtime/stop.request'),pauseFile=path.join(ROOT,'runtime/pause.request');
  while(!fs.existsSync(path.join(ROOT,'runtime/credentials.hybrid.json'))){if(stopping||fs.existsSync(stopFile))return;await new Promise(resolve=>setTimeout(resolve,500));}
  const secret=machineSecrets();validate(config,secret);
- const pool=new Pool({connectionString:secret.pgUrl,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8')},max:6,connectionTimeoutMillis:5000,query_timeout:8000,application_name:'SCCRM-HQ-MemberFanout'});
+ const ca=fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8');
+ const pool=new Pool({connectionString:secret.pgUrl,ssl:{rejectUnauthorized:true,ca},max:6,connectionTimeoutMillis:5000,query_timeout:8000,application_name:'SCCRM-HQ-MemberFanout'});
  pool.on('error',()=>{});const queue=new PgQueue(pool);const source=new HqSource({mode:'live',connection:{...config.source,password:secret.sourcePassword}});
  const adapters=Object.fromEntries(config.targets.map(t=>[t.targetId,new NativeReceiver({mode:'live',connection:{...t,targetIdentity:t.databaseIdentity,password:secret.targetPasswords[t.targetId]}})]));
- let lastError=null,lastSourceError=null,lastScan={},lastCatchup={},engine,lastStatus=0;
+ let lastError=null,lastSourceError=null,lastScan={},lastCatchup={},engine,codeResources,codeService,lifecycle,lastStatus=0,lastCodeTargetCheck=0,codeTargetError=null;
  try{
   await queue.guard();await checkRuntimeRights(pool);
-  engine=new FanoutEngine({queue,adapters,pollMs:1000,leaseMs:15000,timeoutMs:7500,onError:r=>{lastError=r;}}).start();
+  if(config.memberCodes?.enabled){codeService=memberCodeService();await codeService.checkTargetBindings(pool,config.targets);codeResources=codeService.createCodeResources({config:config.memberCodes,secrets:secret.memberCodes,deliveryPool:pool,deliveryPasswords:secret.targetPasswords,pgHost:config.pgHost,targets:config.targets,ca});await codeResources.runtime.queue.guard();}
+  engine=new FanoutEngine({queue,adapters,pollMs:1000,leaseMs:15000,timeoutMs:7500,onError:r=>{lastError=r;}});lifecycle=createLifecycle(engine,codeResources);
   while(!stopping&&!fs.existsSync(stopFile)){
-   const paused=fs.existsSync(pauseFile);
-   if(paused){if(!engine.stopped)await engine.stop();}
-   else{
-    if(engine.stopped)engine.start();
+   if(codeResources&&Date.now()-lastCodeTargetCheck>=5000){try{await codeService.checkTargetBindings(pool,config.targets);codeTargetError=null;}catch(error){codeTargetError=safeCode(error);}lastCodeTargetCheck=Date.now();}
+   const paused=fs.existsSync(pauseFile)||!!codeTargetError;await lifecycle.sync(paused);
+   if(!paused){
     try{lastScan=await scanOnce(source,queue,config.heldSourceIds||{});lastSourceError=null;}catch(e){lastSourceError=safeCode(e);}
     lastCatchup=await catchUpEnabledTargets(queue);
    }
-   if(Date.now()-lastStatus>=5000){writeStatus({state:paused?'paused':lastSourceError?'source-retrying':'healthy',lastScan,lastCatchup,lastSourceError,lastError,targets:await queue.status(),sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows});lastStatus=Date.now();}
+   if(Date.now()-lastStatus>=5000){writeStatus({state:paused?'paused':lastSourceError?'source-retrying':'healthy',lastScan,lastCatchup,lastSourceError,lastError,codeTargetError,memberCodes:codeResources?{enabled:true,...await codeResources.runtime.status()}:{enabled:false},targets:await queue.status(),sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows});lastStatus=Date.now();}
    for(let i=0;i<10&&!stopping&&!fs.existsSync(stopFile);i++)await new Promise(resolve=>setTimeout(resolve,100));
   }
- }finally{if(engine)await engine.stop();source.close();for(const adapter of Object.values(adapters))adapter.close();await pool.end();writeStatus({state:'stopped'});}
+ }finally{try{await shutdownResources({engine,codeResources,source,adapters,pool});}finally{writeStatus({state:'stopped'});}}
 }
 if(require.main===module)run().catch(e=>{try{writeStatus({state:'blocked',code:safeCode(e)});}catch{}process.exitCode=1;});
-module.exports={validate,scanOnce,catchUpEnabledTargets,run,FIXTURE_ID};
+module.exports={validate,validateMemberCodes,scanOnce,catchUpEnabledTargets,createLifecycle,shutdownResources,run,FIXTURE_ID};

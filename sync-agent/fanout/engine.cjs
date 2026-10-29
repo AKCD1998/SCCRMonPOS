@@ -113,7 +113,7 @@ class PgQueue{
  async status(){return (await this.pool.query(`SELECT t.target_id,t.branch_code,t.database_identity,t.enabled,count(j.id)::int total,count(j.id) FILTER(WHERE j.state='succeeded')::int succeeded,count(j.id) FILTER(WHERE j.state='review')::int review,count(j.id) FILTER(WHERE j.state IN('pending','retry','running'))::int waiting,max(j.completed_at) last_completed_at,min(j.queued_at) FILTER(WHERE j.state IN('pending','retry','running')) oldest_waiting_at FROM sccrm_fanout.targets t LEFT JOIN sccrm_fanout.jobs j USING(target_id) GROUP BY t.target_id ORDER BY t.target_id`)).rows;}
 }
 class FanoutEngine{
- constructor({queue,adapters,pollMs=1000,leaseMs=15000,timeoutMs=7500,onError=()=>{}}){requireValue(queue&&adapters&&pollMs>=100&&leaseMs>timeoutMs+1000,'ENGINE_CONFIG_REFUSED');this.queue=queue;this.adapters=adapters;this.pollMs=pollMs;this.leaseMs=leaseMs;this.timeoutMs=timeoutMs;this.onError=onError;this.owner=crypto.randomUUID();this.inFlight=new Map();this.controllers=new Set();this.stopped=true;this.stopping=false;this.ticking=false;}
+ constructor({queue,adapters,pollMs=1000,leaseMs=15000,timeoutMs=7500,onError=()=>{},jobValidator=validateJob}){requireValue(queue&&adapters&&pollMs>=100&&leaseMs>timeoutMs+1000&&typeof jobValidator==='function','ENGINE_CONFIG_REFUSED');this.queue=queue;this.adapters=adapters;this.pollMs=pollMs;this.leaseMs=leaseMs;this.timeoutMs=timeoutMs;this.onError=onError;this.jobValidator=jobValidator;this.owner=crypto.randomUUID();this.inFlight=new Map();this.controllers=new Set();this.stopped=true;this.stopping=false;this.ticking=false;}
  async tick(){if(this.ticking||this.stopping)return;this.ticking=true;try{for(const target of await this.queue.targets()){
   if(this.stopping)break;
   if(this.inFlight.has(target.target_id))continue;const adapter=this.adapters[target.target_id];if(!adapter)continue;
@@ -124,7 +124,7 @@ class FanoutEngine{
   if(this.stopping)return;
   const abort=new AbortController();this.controllers.add(abort);let timer,request;
   try{
-   validateJob(job);request=Promise.resolve().then(()=>adapter.receive(job,{signal:abort.signal}));request.catch(()=>{});
+   this.jobValidator(job);request=Promise.resolve().then(()=>adapter.receive(job,{signal:abort.signal}));request.catch(()=>{});
    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(new ReviewError('DELIVERY_TIMEOUT'));},this.timeoutMs);});
    const ack=await Promise.race([request,deadline]);validateAck(job,ack);await this.queue.succeeded(job,ack);
   }catch(error){await this.queue.failed(job,this.stopping?new ReviewError('SERVICE_STOPPING'):error);
