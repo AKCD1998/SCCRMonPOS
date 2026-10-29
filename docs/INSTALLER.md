@@ -1,5 +1,18 @@
 # Combined SCCRM installer — 1.3.6
 
+## 1.3.11: approve branch 003 POS 002
+
+The user approved POS2 at `100.100.253.52`, Tailscale node
+`nFQPDepQTh11CNTRL`, for branch `003` / register `002` on 29 October 2026.
+Read-only SMB checks confirmed the D-drive AdaPosFront 4.6006.0032 and
+AdaSmart 4.6006.0024 executables. Its local AdaIni identifies
+`POSSRV\\sqlexpress` / `AdaAcc`; branch and register were explicitly confirmed
+by the user because those configuration values were empty.
+The compiled policy binds this node to 003/002 and rejects copied settings
+for another branch or register. Earlier installers do not approve this node.
+No Ada configuration, database, account or running application was changed.
+Actual installation and SQL connection verification remain a separate step.
+
 ## 1.3.6: isolate receipts by branch and cash register
 
 The SQL server is shared by multiple registers. Earlier watchers combined all
