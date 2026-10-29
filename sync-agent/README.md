@@ -4,6 +4,10 @@ Independent HQ-to-branch new-member delivery: see [fanout](fanout/README.md).
 This add-on has its own durable queue, receiving roles and stoppable service;
 it does not replace the current HQ member/history worker or enable legacy bulk sync.
 
+Optional Ada-assigned AR codes, parallel delivery authority and UUID-preserving
+SCCRM code publication: see [member codes](member-codes/README.md). Existing SC
+queue records stay intact; deployment/native UI verification is a separate gate.
+
 Production member/history bridge: see [live launch status](live/WORK_STATUS.md).
 The separately guarded `live/` module is installed as `SCCRMHQMemberSync` on
 HQ000 and connects the existing Supabase to AdaAcc. It imports native contacts

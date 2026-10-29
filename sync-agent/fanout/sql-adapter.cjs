@@ -55,7 +55,7 @@ class NativeReceiver {
   // rather than trusting the opaque digest that the sender supplied earlier.
   if(profileHash(profile)!==r.profile_hash)throw Object.assign(Error('ACK_PROFILE_MISMATCH'),{code:'ACK_PROFILE_MISMATCH'});
   const validity=nativeValidity(r);
-  return {memberId:r.member_id,hqCode:r.hq_code,adaCode:r.ada_code,targetIdentity:r.target_identity,profile,profileHash:r.profile_hash,outcome:r.outcome==='existing'?'already_delivered':r.outcome,receivedAt:r.received_at,...validity};
+  return {memberId:r.member_id,hqCode:r.hq_code,adaCode:r.ada_code,canonicalAdaCode:r.canonical_ada_code||r.ada_code,targetIdentity:r.target_identity,profile,profileHash:r.profile_hash,outcome:r.outcome==='existing'?'already_delivered':r.outcome,receivedAt:r.received_at,...validity};
  }catch(e){if(this.rpc?.closed||/OFFLINE|TIMEOUT|CONNECTION|RPC_PROCESS/.test(e.code||'')){this.rpc?.close();this.rpc=null;}throw e;}}
  async identity(){if(!this.rpc||this.rpc.closed)this.rpc=new SqlRpc({...this.config,role:'receiver'});return this.rpc.query('identity');}
  close(){this.rpc?.close();this.rpc=null;}

@@ -1,5 +1,7 @@
 param([ValidateSet('Read','Write')][string]$Action='Read')
 $ErrorActionPreference='Stop';Add-Type -AssemblyName System.Security
+[Console]::InputEncoding=[Text.Encoding]::UTF8
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
 $file=Join-Path $PSScriptRoot 'runtime\credentials.dpapi';$bytes=$null
 try{
  if($Action -ceq 'Write'){$bytes=[Text.Encoding]::UTF8.GetBytes([Console]::In.ReadToEnd());$protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllBytes($file,$protected);[Console]::WriteLine('PROTECTED')}

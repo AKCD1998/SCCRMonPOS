@@ -75,7 +75,17 @@ async function provisionLive(branches=['005']){
 async function setEnabled(branch,enabled){
  if(enabled)requireCopyProof();if(!BRANCHES.includes(branch))throw Error('BRANCH_REFUSED');const s=state(),a=pgAdmin();if(!s.live?.targets[branch])throw Error('TARGET_NOT_PROVISIONED');
  const admin=new Client({connectionString:a.url.href,ssl:{ca:a.ca,rejectUnauthorized:true},connectionTimeoutMillis:8000});await admin.connect();
- try{const result=await admin.query('UPDATE sccrm_fanout.targets SET enabled=$2 WHERE target_id=$1 AND database_identity=$3 RETURNING target_id,database_identity,enabled',['branch'+branch,enabled,s.live.targets[branch].databaseIdentity]);if(result.rows.length!==1)throw Error('TARGET_ENABLE_IDENTITY_REFUSED');return {ok:true,target:result.rows[0]};}finally{await admin.end();}
+ try{return await setTargetEnabled(admin,{targetId:'branch'+branch,enabled,databaseIdentity:s.live.targets[branch].databaseIdentity});}finally{await admin.end();}
+}
+async function setTargetEnabled(admin,{targetId,enabled,databaseIdentity}){
+ if(!/^branch00[1345]$/.test(targetId)||typeof enabled!=='boolean'||typeof databaseIdentity!=='string'||!databaseIdentity||databaseIdentity.length>160)throw Error('TARGET_ENABLE_ARGUMENT_REFUSED');
+ await admin.query('BEGIN');try{
+  const exists=(await admin.query("SELECT to_regnamespace('sccrm_member_codes') namespace")).rows[0]?.namespace;
+  if(exists){const meta=(await admin.query('SELECT marker,scope,schema_version FROM sccrm_member_codes.meta')).rows;const authority=require('../member-codes/assignment.cjs');if(meta.length!==1||meta[0].marker!==authority.MARKER||meta[0].scope!==authority.SCOPE||meta[0].schema_version!==1)throw Error('MEMBER_CODE_SCHEMA_NOT_OWNED');}
+  const result=await admin.query('UPDATE sccrm_fanout.targets SET enabled=$2 WHERE target_id=$1 AND database_identity=$3 RETURNING target_id,database_identity,branch_code,enabled',[targetId,enabled,databaseIdentity]);if(result.rows.length!==1)throw Error('TARGET_ENABLE_IDENTITY_REFUSED');
+  if(exists){const assigned=await admin.query('UPDATE sccrm_member_codes.targets SET enabled=$2 WHERE target_id=$1 AND database_identity=$3 AND branch_code=$4 RETURNING target_id',[targetId,enabled,databaseIdentity,result.rows[0].branch_code]);if(assigned.rows.length!==1)throw Error('MEMBER_CODE_TARGET_ENABLE_IDENTITY_REFUSED');}
+  await admin.query('COMMIT');return {ok:true,target:result.rows[0],memberCodesSynchronized:!!exists};
+ }catch(error){await admin.query('ROLLBACK').catch(()=>{});throw error;}
 }
 async function transferSecrets(){
  requireCopyProof();const s=state();if(!s.live)throw Error('LIVE_QUEUE_NOT_PREPARED');
@@ -107,4 +117,4 @@ if(require.main===module)(async()=>{
  else if(command==='status')answer=await status();else throw Error('EXPLICIT_FANOUT_OPERATOR_COMMAND_REQUIRED');
  console.log(JSON.stringify(answer));
 })().catch(error=>{console.error(JSON.stringify(error.report||{ok:false,stage,code:error.code||(/^[A-Z_]+$/.test(error.message)?error.message:'FANOUT_OPERATOR_FAILED'),sqlNumber:error.sqlNumber}));process.exitCode=1;});
-module.exports={ROOT,RUNTIME,NATIVE_MARKER,BRANCHES,nativeProvision,pgAdmin,provisionCopy,runCopy,provisionLive,setEnabled,transferSecrets,status,repairPilotValidity};
+module.exports={ROOT,RUNTIME,NATIVE_MARKER,BRANCHES,nativeProvision,pgAdmin,provisionCopy,runCopy,provisionLive,setEnabled,setTargetEnabled,transferSecrets,status,repairPilotValidity};
