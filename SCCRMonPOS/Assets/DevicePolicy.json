@@ -69,6 +69,18 @@
       ]
     },
     {
+      "nodeId": "nFQPDepQTh11CNTRL",
+      "hostname": "POS2",
+      "ipv4": "100.100.253.52",
+      "status": "approved",
+      "receiptBranchCode": "003",
+      "receiptPosCode": "002",
+      "adaPaths": [
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaPos\\AdaPosFront.exe",
+        "D:\\AdaSoft\\AdaPos4.0HpmFhn\\AdaSmart\\AdaSmart.exe"
+      ]
+    },
+    {
       "nodeId": "noJJCWPrL221CNTRL",
       "hostname": "POS002",
       "ipv4": "100.73.76.18",
