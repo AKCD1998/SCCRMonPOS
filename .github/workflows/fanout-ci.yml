@@ -49,5 +49,7 @@ jobs:
             [Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$fanoutTokens,[ref]$fanoutErrors) | Out-Null
             if (@($fanoutErrors).Count) { throw ($fanoutErrors | Out-String) }
           }
-          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /target:exe /reference:System.ServiceProcess.dll /out:SCCRMHQMemberFanout-check.exe sync-agent/fanout/ServiceHost.cs
+          $fanoutSource=(Resolve-Path 'sync-agent/fanout/ServiceHost.cs').Path
+          $fanoutExe=Join-Path (Get-Location) 'SCCRMHQMemberFanout-check.exe'
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /target:exe /reference:System.ServiceProcess.dll /out:$fanoutExe $fanoutSource
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
