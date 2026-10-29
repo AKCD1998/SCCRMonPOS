@@ -333,15 +333,9 @@ namespace SCCRMonPOS
             {
                 foreach (PosReceiptItem item in receipt.Items)
                 {
-                    bool excluded = IsExcludedFromPoints(item.ProductName);
                     var row = new ListViewItem(TruncateName(item.ProductName ?? item.ProductCode ?? "-"));
                     row.SubItems.Add(item.Qty.ToString("0.##", CultureInfo.InvariantCulture));
                     row.SubItems.Add(item.NetAmount.ToString("N2", CultureInfo.InvariantCulture));
-                    if (excluded)
-                    {
-                        row.ForeColor = Color.Firebrick;
-                        row.BackColor = Color.FromArgb(255, 235, 235);
-                    }
                     _lvItems.Items.Add(row);
                 }
             }
@@ -857,11 +851,6 @@ namespace SCCRMonPOS
             return (int)Math.Floor(amount / _bahtPerPoint);
         }
 
-        private static bool IsExcludedFromPoints(string productName)
-        {
-            return (productName ?? "").StartsWith("เภสัช", StringComparison.Ordinal);
-        }
-
         private static decimal CalcEligibleTotal(PosReceipt receipt)
         {
             if (receipt == null || receipt.Items == null)
@@ -870,8 +859,7 @@ namespace SCCRMonPOS
             decimal total = 0m;
             foreach (PosReceiptItem item in receipt.Items)
             {
-                if (!IsExcludedFromPoints(item.ProductName))
-                    total += item.NetAmount;
+                total += item.NetAmount;
             }
             return total;
         }
