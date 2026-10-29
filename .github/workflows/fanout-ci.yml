@@ -1,0 +1,53 @@
+name: Member fanout checks
+on:
+  pull_request:
+    paths: ['sync-agent/fanout/**', '.github/workflows/fanout-ci.yml']
+  push:
+    branches: [master]
+    paths: ['sync-agent/fanout/**', '.github/workflows/fanout-ci.yml']
+permissions:
+  contents: read
+jobs:
+  queue:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sccrm_fanout_test_ci
+        ports: ['55445:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sccrm_fanout_test_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: sync-agent
+    env:
+      SCCRM_FANOUT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55445/sccrm_fanout_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sync-agent/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell and compile isolated service host
+        run: |
+          Get-ChildItem sync-agent/fanout/*.ps1 | ForEach-Object {
+            $fanoutErrors=$null; $fanoutTokens=$null
+            [Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$fanoutTokens,[ref]$fanoutErrors) | Out-Null
+            if (@($fanoutErrors).Count) { throw ($fanoutErrors | Out-String) }
+          }
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /target:exe /reference:System.ServiceProcess.dll /out:SCCRMHQMemberFanout-check.exe sync-agent/fanout/ServiceHost.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
