@@ -21,6 +21,8 @@
   ledger. Pause ambiguous/changed sources rather than guessing a replacement.
 - Include copy-only retry, restart, ACK-loss, duplicate, ownership, permission
   and full-column preservation checks, plus scoped service staging/stop controls.
+- Check service boot privileges through catalog object IDs so the restricted
+  worker does not need access to external schemas merely to inspect its rights.
 - Prepare version 1.3.12.0 and release notes locally. HQ point-service rollout,
   native/UI verification and release publication are separate checks; this
   entry alone does not claim a deployed or published update.
