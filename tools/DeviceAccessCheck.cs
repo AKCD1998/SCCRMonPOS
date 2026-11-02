@@ -27,7 +27,7 @@ internal static class DeviceAccessCheck
             policy = Policy(); policy.Devices[0].Status = "denied"; Assert(!Allows(policy, Identity()));
             policy = Policy(); policy.Devices = new[] { policy.Devices[0], policy.Devices[0] }; Assert(!Allows(policy, Identity()));
             Assert(!Allows(null, Identity())); Assert(!Allows(Policy(), null));
-            policy = DeviceAccessGuard.LoadPolicy(); Assert(policy.Devices.Count(d => d.Status == "approved") == 8);
+            policy = DeviceAccessGuard.LoadPolicy(); Assert(policy.Devices.Count(d => d.Status == "approved") == 9);
             Assert(policy.Devices.All(d => !string.IsNullOrEmpty(d.NodeId) && !string.IsNullOrEmpty(d.Ipv4)));
             var pos2 = new TailnetIdentity { BackendState = "Running", CurrentTailnet = new TailnetName { Name = "akcd1998.github" }, Self = new TailnetNode { Id = "nEdQXowQ4t11CNTRL", Hostname = "POS2", Online = true, Ips = new[] { "100.93.254.58" } } };
             Assert(Allows(policy, pos2));
@@ -48,6 +48,13 @@ internal static class DeviceAccessCheck
             branch003Pos2.Self.Id = "unapproved-node-with-same-ip"; Assert(!Allows(policy, branch003Pos2));
             branch003Pos2.Self.Id = "nFQPDepQTh11CNTRL"; branch003Pos2.Self.Ips = new[] { "100.93.254.58" }; Assert(!Allows(policy, branch003Pos2));
             branch003Pos2.Self.Ips = new[] { "100.100.253.52" }; branch003Pos2.Self.Hostname = "OTHER"; Assert(!Allows(policy, branch003Pos2));
+            var branch005Two = new TailnetIdentity { BackendState = "Running", CurrentTailnet = new TailnetName { Name = "akcd1998.github" }, Self = new TailnetNode { Id = "nkbfkybTAP11CNTRL", Hostname = "FRONT2", Online = true, Ips = new[] { "100.99.142.113" } } };
+            Assert(Allows(policy, branch005Two));
+            Assert(!Allows(policy, branch005Two, adapter: false));
+            Assert(!Allows(policy, branch005Two, ada: false));
+            branch005Two.Self.Id = "unapproved-node-with-same-ip"; Assert(!Allows(policy, branch005Two));
+            branch005Two.Self.Id = "nkbfkybTAP11CNTRL"; branch005Two.Self.Ips = new[] { "100.106.107.80" }; Assert(!Allows(policy, branch005Two));
+            branch005Two.Self.Ips = new[] { "100.99.142.113" }; branch005Two.Self.Hostname = "OTHER"; Assert(!Allows(policy, branch005Two));
             bool denied = false; try { new UpdateRelease().RequireDeviceAccess(); } catch { denied = true; } Assert(denied);
             new UpdateRelease { DeviceAccessVersion = 1 }.RequireDeviceAccess(); Assert(true);
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + "}"); return 0;

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-11-02 — 1.3.13 Branch 005 POS 002 approval
+
+- Approve the user-identified FRONT2 device by its verified stable Tailscale
+  node, hostname, IPv4 and read-only verified local Ada executable paths.
+- Bind receipt access to branch 005 / POS 002. Copied POS 001 configuration
+  cannot override the assignment or expose another register's receipts.
+- Preserve all eight existing approvals and the Ada-authoritative points flow.
+- Add approval and receipt-isolation checks for FRONT2. Release publication
+  and installation on the POS remain separate verification steps.
+
 ### 2026-11-02 — 1.3.12 Ada-calculated points
 
 - Use Ada's authoritative points metadata in member search, member details and
