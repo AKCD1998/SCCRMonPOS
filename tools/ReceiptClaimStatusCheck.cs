@@ -97,6 +97,7 @@ internal static class ReceiptClaimStatusCheck
     private static void Run()
     {
         using(var server=new Server()) {
+            Environment.SetEnvironmentVariable("SCCRMONPOS__ApiBaseUrl",server.BaseUrl);
             bool claimed=false,fail=false,race=false,malformed=false;
             server.Respond=(path,body)=> {
                 if(path.StartsWith("/api/loyalty/claims/status?"))return Task.FromResult(new Reply {Code=fail?503:200,Json=fail?"{\"error\":\"unavailable\"}":malformed?"{\"ok\":true}":Status(claimed)});
@@ -161,14 +162,39 @@ internal static class ReceiptClaimStatusCheck
             server.Respond=(path,body)=>Task.FromResult(new Reply {Json=Status(false,"S-WRONG")});
             bool mismatch=false;try { Pump(api.GetReceiptClaimStatusAsync("004","S-FIXTURE")); }catch(ApiException){mismatch=true;}
             Check(mismatch,"mismatched receipt response is rejected");
+            int previewCalls=0;
+            server.Respond=(path,body)=>{
+                if(path.StartsWith("/api/sccrm/promotions/active"))return Task.FromResult(new Reply{Json="{\"ok\":true,\"pointsMode\":\"ada-primary\",\"pointsSource\":\"ada\",\"revision\":\"ada-native-recorded\"}"});
+                if(path.StartsWith("/api/sccrm/promotions/quote")){previewCalls++;return Task.FromResult(new Reply{Code=409,Json="{}"});}
+                return Task.FromResult(new Reply{Json=Status(false)});
+            };
+            using(var f=new Fixture(api,Receipt())){
+                f.Wait();
+                Pump((Task)Call(f.Form,"RefreshCentralQuoteAsync"));
+                Call(f.Form,"AddMemberRow",new MemberSearchResult{Id="ada-fixture",DisplayName="Native fixture",CurrentPoints=51.5m,
+                    BalanceExact="51.5000",PointsAvailable=true,PointsSource="ada"});
+                Call(f.Form,"SelectMemberAtRow",0);
+                Check(Field<Label>(f.Form,"_lblMemberPoints").Text.Contains("51.5000") && !Field<Label>(f.Form,"_lblMemberPoints").Text.Contains("->"),"Ada balance is exact and never adds the bill award again");
+                var claim=(LoyaltyClaimRequest)Call(f.Form,"BuildClaimRequest");
+                Check(claim.PreviewPoints==0 && previewCalls==0,"Ada mode requests no local preview and sends no calculated estimate");
+                Check(Field<Button>(f.Form,"_btnConfirm").Text=="บันทึกประวัติบิล","Ada mode button states that it records history");
+                Call(f.Form,"ShowSuccess",new LoyaltyClaimResponse{AwardedPoints=3,NewPointsBalance=51.5m,BalanceExact="51.5000",
+                    PointsSource="ada",PointsStatus="recorded_by_ada",PointsCredited=false});
+                Check(Field<Label>(f.Form,"_lblStatus").Text.Contains("บันทึกประวัติ") && !Field<Label>(f.Form,"_lblStatus").Text.Contains("ได้รับ"),"history success does not promise another credit");
+                Call(f.Form,"AddMemberRow",new MemberSearchResult{Id="stale-fixture",DisplayName="Unavailable fixture",CurrentPoints=null,PointsAvailable=false,PointsSource="ada",PointsStatus="stale"});
+                Call(f.Form,"SelectMemberAtRow",1);
+                Check(!f.Enabled && Field<Label>(f.Form,"_lblMemberPoints").Text.Contains(": -"),"unavailable balance stays a dash and cannot be confirmed");
+            }
         }
     }
     [STAThread] private static int Main() {
+        string previousBase=Environment.GetEnvironmentVariable("SCCRMONPOS__ApiBaseUrl");
         try {
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             // Install the UI context before awaiting HTTP work in the constructor.
             using(var context=new Control()) { context.CreateControl(); SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext()); Run(); }
             Console.WriteLine("{\"ok\":true,\"checks\":"+checks+",\"productionWrites\":0,\"sqlConnections\":0}");return 0;
         }catch(Exception error) { Console.WriteLine("{\"ok\":false,\"checks\":"+checks+",\"error\":\""+error.GetBaseException().Message.Replace("\"","'")+"\"}");return 1; }
+        finally{Environment.SetEnvironmentVariable("SCCRMONPOS__ApiBaseUrl",previousBase);}
     }
 }

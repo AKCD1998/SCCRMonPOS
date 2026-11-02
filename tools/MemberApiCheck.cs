@@ -56,6 +56,25 @@ internal static class MemberApiCheck
         Check(array.Length == 1 && !array[0].PointsAvailable);
         var legacy = Parse<MemberSearchResult>("ParseMemberSearchResultFromApiResponse", "{\"id\":\"legacy\",\"currentPoints\":17}");
         Check(legacy.PointsAvailable && legacy.PharmacyMedRecordAvailable && legacy.CurrentPoints == 17);
+        string ada="{\"id\":\"ada-fixture\",\"currentPoints\":51.5,\"pointsAvailable\":true,\"pointsSource\":\"ada\",\"pointsStatus\":\"available\",\"balanceExact\":\"51.5000\",\"pointsObservedAt\":\"2026-11-02T02:00:00Z\"}";
+        var native=Parse<MemberSearchResult>("ParseMemberSearchResultFromApiResponse",ada);
+        Check(native.CurrentPoints==51.5m && native.UsesAdaPoints && native.BalanceExact=="51.5000");
+        Check(PointMetadata.Format(native.CurrentPoints,native.BalanceExact,native.PointsAvailable)=="51.5000");
+        var unavailable=Parse<MemberSearchResult>("ParseMemberSearchResultFromApiResponse",ada.Replace("51.5,","null,").Replace("true,\"pointsSource","false,\"pointsSource"));
+        Check(!unavailable.PointsAvailable && !unavailable.CurrentPoints.HasValue && PointMetadata.Format(unavailable.CurrentPoints,unavailable.BalanceExact,unavailable.PointsAvailable)=="-");
+        Check(PointMetadata.Format(null)=="-" && PointMetadata.Format(0m)=="0" && PointMetadata.Format(-1.5m)=="-1.5");
+        Check(PointMetadata.Format(null,"900719925474099312345678901234567890")=="900719925474099312345678901234567890");
+        Check(PointMetadata.Format(null,"0.000000000000000000000000000001")=="0.000000000000000000000000000001");
+        Check(PointMetadata.Format(null,"not-a-number")=="-");
+        var claim=Parse<LoyaltyClaimResponse>("ParseLoyaltyClaimResponse","{\"ok\":true,\"awardedPoints\":3,\"newPointsBalance\":51.5,\"balanceExact\":\"51.5000\",\"pointsSource\":\"ada\",\"pointsStatus\":\"recorded_by_ada\",\"pointsCredited\":false}");
+        Check(claim.NewPointsBalance==51.5m && claim.UsesAdaPoints && claim.PointsCredited==false);
+        var history=Parse<PurchaseHistoryResult>("ParsePurchaseHistory","{\"purchases\":[{\"receiptNo\":\"S-FIXTURE\",\"awardedPoints\":null,\"pointsAvailable\":false,\"pointsSource\":\"ada\",\"pointsStatus\":\"stale\",\"returns\":[{\"pointsReversed\":null}]}]}");
+        Check(!history.Purchases[0].AwardedPoints.HasValue && !history.Purchases[0].PointsAvailable && !history.Purchases[0].Returns[0].PointsReversed.HasValue);
+        var merge=typeof(ApiClient).Assembly.GetType("SCCRMonPOS.MemberClaimForm").GetMethod("MergeMemberDetail",BindingFlags.NonPublic|BindingFlags.Static);
+        foreach(decimal? value in new decimal?[]{0m,-1.5m,null}) {
+            var merged=(MemberDetail)merge.Invoke(null,new object[]{new MemberDetail{CurrentPoints=value,PointsAvailable=value.HasValue,PointsSource="ada"},new MemberSearchResult{CurrentPoints=999m}});
+            Check(merged.CurrentPoints==value && merged.PointsAvailable==value.HasValue && merged.UsesAdaPoints);
+        }
         Check(Parse<string>("TryExtractError", "{\"message\":\"Phone already registered\"}") == "Phone already registered");
         Check(Parse<string>("TryExtractError", "{\"error\":\"Invalid phone\"}") == "Invalid phone");
         Console.WriteLine("{\"ok\":true,\"mode\":\"offline\",\"checks\":" + checks + "}");

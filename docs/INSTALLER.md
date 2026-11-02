@@ -1,4 +1,18 @@
-# Combined SCCRM installer — 1.3.6
+# Combined SCCRM installer
+
+## 1.3.12: use Ada-calculated points
+
+When the central backend enables Ada-authority mode, member search/details and
+purchase history show the native points balance and its availability. The
+receipt action reads **บันทึกประวัติบิล** and does not preview or credit a separate
+SCCRM award. Select the member in Ada before payment when Ada should calculate
+points. Scanning a receipt afterwards saves purchase history and reads any
+award already recorded by Ada; it does not retroactively create that award.
+
+The existing combined installer, approved-device checks, read-only connection
+setup and optional update behavior remain in place. Installing this client does
+not install or enable the separately managed HQ points service. Local prepared
+artifacts and source checks do not establish production rollout or publication.
 
 ## 1.3.11: approve branch 003 POS 002
 
