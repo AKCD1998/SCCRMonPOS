@@ -18,6 +18,8 @@ namespace SCCRMonPOS
         private LinkLabel _updateNotice;
         private int? _centralQuotePoints;
         private bool _quoteLoading;
+        private bool _adaPointsMode, _pointsModeKnown;
+        private bool UsesAdaPoints { get { return _adaPointsMode || _selectedMember?.UsesAdaPoints == true; } }
         private bool _uiBusy;
         private bool _claimCompleted;
         private ReceiptClaimStatus _receiptClaimStatus;
@@ -277,17 +279,18 @@ namespace SCCRMonPOS
             {
                 var quote = await CentralPromotions.QuoteAsync(CalcEligibleTotal(receipt), receipt.BranchCode);
                 if (IsDisposed || !ReferenceEquals(receipt, _receipt)) return;
-                _centralQuotePoints = quote.AwardedPoints;
-                _lblPreviewPoints.Text = "แต้มตามโปรส่วนกลาง: " + quote.AwardedPoints.ToString(CultureInfo.InvariantCulture);
+                _adaPointsMode=quote.UsesAdaPoints; _pointsModeKnown=true;
+                _centralQuotePoints = quote.UsesAdaPoints ? (int?)null : quote.AwardedPoints;
+                _lblPreviewPoints.Text = quote.UsesAdaPoints ? "แต้มตามที่ Ada บันทึก" : "แต้มตามโปรส่วนกลาง: " + quote.AwardedPoints.ToString(CultureInfo.InvariantCulture);
             }
             catch
             {
                 if (IsDisposed || !ReferenceEquals(receipt, _receipt)) return;
                 _centralQuotePoints = null;
-                _lblPreviewPoints.Text = "ตรวจสอบโปรไม่ได้ — คิดแต้มจริงเมื่อยืนยัน";
+                _lblPreviewPoints.Text = UsesAdaPoints ? "แต้มตามที่ Ada บันทึก" : "ยังอ่านข้อมูลแต้มไม่ได้";
             }
             finally { _quoteLoading = false; }
-            if (!IsDisposed) ShowMemberSummary(_selectedMember);
+            if (!IsDisposed) { ShowMemberSummary(_selectedMember); UpdateConfirmButton(); }
         }
 
         private async Task LoadReceiptAsync()
@@ -407,7 +410,7 @@ namespace SCCRMonPOS
         {
             var row = new DataGridViewRow();
             row.CreateCells(_dgvResults, member.Id, member.MemberCode ?? "", member.DisplayName ?? "-", member.Phone ?? "",
-                member.PointsAvailable ? member.CurrentPoints.ToString(CultureInfo.InvariantCulture) : "ยังไม่เปิดใช้");
+                PointMetadata.Format(member.CurrentPoints,member.BalanceExact,member.PointsAvailable));
             // Automatic first-row selection fires synchronously during Add.
             // Attach the capabilities before that event can select the member.
             row.Tag = member;
@@ -441,7 +444,7 @@ namespace SCCRMonPOS
                 return;
 
             DataGridViewRow row = _dgvResults.Rows[rowIndex];
-            int points;
+            decimal points;
 
             _selectedMember = row.Tag as MemberSearchResult ?? new MemberSearchResult
             {
@@ -449,7 +452,8 @@ namespace SCCRMonPOS
                 DisplayName = row.Cells["DisplayName"].Value != null ? row.Cells["DisplayName"].Value.ToString() : "",
                 Phone = row.Cells["Phone"].Value != null ? row.Cells["Phone"].Value.ToString() : "",
                 MemberCode = row.Cells["MemberCode"].Value != null ? row.Cells["MemberCode"].Value.ToString() : "",
-                CurrentPoints = int.TryParse(row.Cells["Points"].Value != null ? row.Cells["Points"].Value.ToString() : "0", out points) ? points : 0
+                CurrentPoints = decimal.TryParse(Convert.ToString(row.Cells["Points"].Value),NumberStyles.Number,CultureInfo.InvariantCulture,out points) ? (decimal?)points : null,
+                PointsAvailable = decimal.TryParse(Convert.ToString(row.Cells["Points"].Value),NumberStyles.Number,CultureInfo.InvariantCulture,out points)
             };
             _selectedMemberDetail = null;
 
@@ -478,13 +482,14 @@ namespace SCCRMonPOS
             _lblMemberName.Text = member.DisplayName + (string.IsNullOrWhiteSpace(member.Phone) ? "" : " | " + member.Phone);
             if (!member.PointsAvailable)
             {
-                _lblMemberPoints.Text = "ระบบแต้มยังไม่เปิดใช้ — สมัคร ค้นหา และแก้ไขสมาชิกได้";
+                _lblMemberPoints.Text = "แต้มปัจจุบัน: - (ยังอ่านข้อมูลแต้มไม่ได้)";
                 _pnlMemberSummary.Visible = true;
                 _btnEditMember.Visible = true;
                 return;
             }
-            _lblMemberPoints.Text = "แต้มปัจจุบัน: " + member.CurrentPoints.ToString(CultureInfo.InvariantCulture) +
-                                    (pts > 0 ? " -> " + (member.CurrentPoints + pts).ToString(CultureInfo.InvariantCulture) + " หลังสะสม" : "");
+            _lblMemberPoints.Text = "แต้มปัจจุบัน: " + PointMetadata.Format(member.CurrentPoints,member.BalanceExact,member.PointsAvailable) +
+                (UsesAdaPoints ? " (จาก Ada)" : pts>0 && member.CurrentPoints.HasValue ? " -> " + PointMetadata.Format(member.CurrentPoints.Value+pts) + " หลังสะสม" : "");
+            if(UsesAdaPoints) _lblPreviewPoints.Text="บันทึกประวัติ · แต้มจาก Ada";
             _pnlMemberSummary.Visible = true;
             _btnEditMember.Visible = true;
         }
@@ -585,7 +590,7 @@ namespace SCCRMonPOS
                         row.Cells["MemberCode"].Value = updated.MemberCode;
                         row.Cells["DisplayName"].Value = updated.DisplayName;
                         row.Cells["Phone"].Value = updated.Phone;
-                        row.Cells["Points"].Value = updated.PointsAvailable ? updated.CurrentPoints.ToString(CultureInfo.InvariantCulture) : "ยังไม่เปิดใช้";
+                        row.Cells["Points"].Value = PointMetadata.Format(updated.CurrentPoints,updated.BalanceExact,updated.PointsAvailable);
                         row.Tag = updated;
                         break;
                     }
@@ -665,7 +670,7 @@ namespace SCCRMonPOS
             if (!CanConfirm())
                 return;
 
-            SetStatus("กำลังบันทึกบิลและแต้ม...", false, Color.DimGray);
+            SetStatus(UsesAdaPoints ? "กำลังบันทึกประวัติบิล..." : "กำลังบันทึกบิลและแต้ม...", false, Color.DimGray);
             SetUiBusy(true);
 
             LoyaltyClaimResponse response = null;
@@ -754,7 +759,7 @@ namespace SCCRMonPOS
                 ReceiptDiscount = _receipt.Discount,
                 PosCode = _receipt.PosCode,
                 ReceiptCashierCode = _receipt.CashierCode,
-                PreviewPoints = _centralQuotePoints ?? CalcPoints(eligibleTotal),
+                PreviewPoints = UsesAdaPoints ? 0 : _centralQuotePoints ?? (_pointsModeKnown ? CalcPoints(eligibleTotal) : 0),
                 MemberId = _selectedMember.Id,
                 Items = items
             };
@@ -764,8 +769,10 @@ namespace SCCRMonPOS
         {
             _promotionTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
-            _lblStatus.Text = "บันทึกบิลสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) +
-                              " แต้ม | ยอดรวม " + response.NewPointsBalance.ToString(CultureInfo.InvariantCulture) + " แต้ม";
+            _lblStatus.Text = response.UsesAdaPoints
+                ? "บันทึกประวัติบิลแล้ว · " + (response.PointsStatus=="not_recorded_by_ada" ? "Ada ยังไม่มีรายการแต้มของบิลนี้" : "แต้มที่ Ada บันทึก " + PointMetadata.Format(response.AwardedPoints,response.AwardedPointsExact)) +
+                  " | แต้มปัจจุบัน " + PointMetadata.Format(response.NewPointsBalance,response.BalanceExact)
+                : "บันทึกบิลสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) + " แต้ม | ยอดรวม " + PointMetadata.Format(response.NewPointsBalance) + " แต้ม";
             _btnConfirm.Enabled = false;
             _btnCancel.Text = "ปิด";
 
@@ -796,6 +803,7 @@ namespace SCCRMonPOS
 
         private void UpdateConfirmButton()
         {
+            _btnConfirm.Text=_receiptClaimStatus?.Claimed==true?"บันทึกแล้ว":UsesAdaPoints?"บันทึกประวัติบิล":"ยืนยันบิล / สะสมแต้ม";
             _btnConfirm.Enabled = CanConfirm();
         }
 
@@ -835,8 +843,12 @@ namespace SCCRMonPOS
                 Phone         = !string.IsNullOrWhiteSpace(detail?.Phone) ? detail.Phone : summary?.Phone,
                 Email         = !string.IsNullOrWhiteSpace(detail?.Email) ? detail.Email : summary?.Email,
                 MemberCode    = !string.IsNullOrWhiteSpace(detail?.MemberCode) ? detail.MemberCode : summary?.MemberCode,
-                CurrentPoints = detail != null && detail.CurrentPoints > 0 ? detail.CurrentPoints : (summary != null ? summary.CurrentPoints : 0),
+                CurrentPoints = detail != null ? detail.CurrentPoints : summary?.CurrentPoints,
                 PointsAvailable = detail?.PointsAvailable ?? summary?.PointsAvailable ?? true,
+                PointsSource=detail != null ? detail.PointsSource : summary?.PointsSource,
+                PointsStatus=detail != null ? detail.PointsStatus : summary?.PointsStatus,
+                PointsObservedAt=detail != null ? detail.PointsObservedAt : summary?.PointsObservedAt,
+                BalanceExact=detail != null ? detail.BalanceExact : summary?.BalanceExact,
                 PharmacyMedRecordAvailable = detail?.PharmacyMedRecordAvailable ?? summary?.PharmacyMedRecordAvailable ?? true,
                 Sex           = detail?.Sex,
                 Dob           = detail?.Dob,
@@ -899,8 +911,7 @@ namespace SCCRMonPOS
                 return "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
             if (raw.IndexOf("already claimed", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 raw.IndexOf("already_claimed", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                raw.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                raw.IndexOf("HTTP 409", StringComparison.OrdinalIgnoreCase) >= 0)
+                raw.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "บิลนี้ถูกสะสมแต้มไปแล้ว";
             if (raw.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "ไม่พบข้อมูลที่ใช้สำหรับสะสมแต้ม";

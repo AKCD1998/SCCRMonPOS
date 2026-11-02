@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### 2026-11-02 — 1.3.12 Ada-calculated points
+
+- Use Ada's authoritative points metadata in member search, member details and
+  purchase history. Preserve exact balances and show unavailable points as
+  unavailable instead of substituting zero or an earlier balance.
+- In Ada-authority mode, saving a receipt records purchase history and reads
+  Ada's recorded award without previewing or awarding points a second time.
+  Explain that the member must be selected in Ada before payment for Ada to
+  calculate the award; the old manual earn form directs staff to that flow.
+- Keep application updates optional and preserve existing installer/device,
+  read-only Ada connection, receipt ownership and saved-claim protections.
+- Add a separate headless HQ points worker with verified five-database native
+  observations, explicit approved-code ownership, immutable opening baselines,
+  compensation proofs, monotonic revisions and durable per-target delivery.
+- Add least-privilege private Supabase storage and native append-only receivers;
+  preserve customer profiles, original point entries and the archived SCCRM
+  ledger. Pause ambiguous/changed sources rather than guessing a replacement.
+- Include copy-only retry, restart, ACK-loss, duplicate, ownership, permission
+  and full-column preservation checks, plus scoped service staging/stop controls.
+- Prepare version 1.3.12.0 and release notes locally. HQ point-service rollout,
+  native/UI verification and release publication are separate checks; this
+  entry alone does not claim a deployed or published update.
+
 ### 2026-10-29 — Ada-assigned member codes
 
 - Add an optional AR member-code authority and durable branch queue alongside

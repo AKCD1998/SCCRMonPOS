@@ -18,6 +18,9 @@ namespace SCCRMonPOS
         [DataMember(Name = "awardedPoints")] public int AwardedPoints { get; set; }
         [DataMember(Name = "basePoints")] public int BasePoints { get; set; }
         [DataMember(Name = "revision")] public string Revision { get; set; }
+        [DataMember(Name = "pointsMode")] public string PointsMode { get; set; }
+        [DataMember(Name = "pointsSource")] public string PointsSource { get; set; }
+        public bool UsesAdaPoints { get { return PointsMode=="ada-primary" || PointsSource=="ada"; } }
     }
 
     // Business data is read from the API independently of the update channel.
@@ -36,7 +39,13 @@ namespace SCCRMonPOS
         }
         public static async Task<CentralPointQuote> QuoteAsync(decimal amount, string branchCode)
         {
-            string url = BaseUrl + "/api/sccrm/promotions/quote?amount=" + amount.ToString("F2", CultureInfo.InvariantCulture) + "&branchCode=" + Uri.EscapeDataString(branchCode ?? "");
+            var catalog = await ReadAsync("/api/sccrm/promotions/active?branchCode="+Uri.EscapeDataString(branchCode ?? ""));
+            if (catalog.UsesAdaPoints) return catalog;
+            return await ReadAsync("/api/sccrm/promotions/quote?amount=" + amount.ToString("F2", CultureInfo.InvariantCulture) + "&branchCode=" + Uri.EscapeDataString(branchCode ?? ""));
+        }
+        private static async Task<CentralPointQuote> ReadAsync(string path)
+        {
+            string url = BaseUrl + path;
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12)))
             {

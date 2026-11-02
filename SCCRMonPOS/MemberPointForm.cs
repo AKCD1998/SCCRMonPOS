@@ -449,7 +449,7 @@ namespace SCCRMonPOS
             _lblName.Text          = c.FullName    ?? "—";
             _lblPhone.Text         = c.Phone       ?? "—";
             _lblMemberCode.Text    = c.MemberCode  ?? "—";
-            _lblCurPoints.Text     = c.Balance.ToString("N0") + " แต้ม";
+            _lblCurPoints.Text = PointMetadata.Format(c.Balance,c.BalanceExact,c.PointsAvailable) + " แต้ม";
             _lblTier.Text          = c.Tier        ?? "—";
             _grpMemberInfo.Enabled = true;
             _lblStep1Error.Text    = "";
@@ -506,7 +506,7 @@ namespace SCCRMonPOS
             if (_customer == null) return;
             _lblS2MemberCode.Text = _customer.MemberCode ?? "—";
             _lblS2Name.Text       = _customer.FullName   ?? "—";
-            _lblS2CurPoints.Text  = _customer.Balance.ToString("N0") + " แต้ม";
+            _lblS2CurPoints.Text = PointMetadata.Format(_customer.Balance,_customer.BalanceExact,_customer.PointsAvailable) + " แต้ม";
             _lblStep2Error.Text   = "";
 
             // Pre-fill from AdaPos standing-by receipt if available
@@ -545,6 +545,7 @@ namespace SCCRMonPOS
 
         private void RecalcPoints()
         {
+            if (_customer?.UsesAdaPoints == true) { _lblEarned.Text="แต้มตามที่ Ada บันทึก"; return; }
             decimal bill;
             if (!TryParseBill(_txtBillAmount.Text, out bill))
             {
@@ -587,6 +588,8 @@ namespace SCCRMonPOS
         private async Task Step2ConfirmAsync()
         {
             _lblStep2Error.Text = "";
+            if (_customer?.UsesAdaPoints == true) { _lblStep2Error.Text="กรุณาคิดแต้มผ่าน Ada แล้วใช้หน้าบันทึกประวัติบิล"; return; }
+            if (_customer == null || !_customer.Balance.HasValue) { _lblStep2Error.Text="ยังอ่านยอดแต้มไม่ได้ กรุณาค้นหาสมาชิกใหม่"; return; }
 
             if (_requireProductScreening)
             {
@@ -631,7 +634,7 @@ namespace SCCRMonPOS
             }
 
             int    earned    = CalcPoints();
-            int    newTotal  = _customer.Balance + earned;
+            decimal newTotal = _customer.Balance.Value + earned;
             string receiptNo = _txtReceiptNo.Text.Trim();
 
             string confirmMsg =
@@ -726,6 +729,7 @@ namespace SCCRMonPOS
         private void WriteAuditLog(EarnApiResult result, decimal bill, string receiptNo)
         {
             if (_txRepo == null) return;
+            if (!_customer.Balance.HasValue || !result.Balance.HasValue || result.UsesAdaPoints) return;
             try
             {
                 _txRepo.Append(new TransactionLog
@@ -737,8 +741,8 @@ namespace SCCRMonPOS
                     ReceiptNo       = receiptNo,
                     BillAmount      = bill,
                     EarnedPoints    = result.PointsAwarded,
-                    PointsBefore    = _customer.Balance,
-                    PointsAfter     = result.Balance,
+                    PointsBefore    = checked((int)_customer.Balance.Value),
+                    PointsAfter     = checked((int)result.Balance.Value),
                     CreatedAt       = DateTime.Now,
                     PosMachineName  = Environment.MachineName
                 });
@@ -759,7 +763,7 @@ namespace SCCRMonPOS
                     ? "ยอดที่ร่วมสะสมแต้ม :  " + bill.ToString("N2") + " บาท\n"
                     : "ยอดบิล       :  " + bill.ToString("N2") + " บาท\n") +
                 "แต้มที่ได้รับ  :  " + result.PointsAwarded.ToString("N0") + " แต้ม\n" +
-                "แต้มรวมใหม่  :  " + result.Balance.ToString("N0") + " แต้ม\n\n" +
+                "แต้มรวมใหม่  :  " + PointMetadata.Format(result.Balance,result.BalanceExact) + " แต้ม\n\n" +
                 "[" + result.TransactionId + "]";
 
             MessageBox.Show(msg, "SCCRM — สะสมแต้มสำเร็จ",

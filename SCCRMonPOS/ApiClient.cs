@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -17,7 +17,27 @@ namespace SCCRMonPOS
     //  Data shapes returned by the backend API
     // ───────────────────────────────────────────────────────────────────────────
 
-    public class ApiCustomer
+    [DataContract]
+    public class PointMetadata
+    {
+        [DataMember(Name="pointsSource")] public string PointsSource { get; set; }
+        [DataMember(Name="pointsStatus")] public string PointsStatus { get; set; }
+        [DataMember(Name="pointsObservedAt")] public string PointsObservedAt { get; set; }
+        [DataMember(Name="balanceExact")] public string BalanceExact { get; set; }
+        [DataMember(Name="awardedPointsExact")] public string AwardedPointsExact { get; set; }
+        [DataMember(Name="pointsCredited")] public bool? PointsCredited { get; set; }
+
+        public bool UsesAdaPoints { get { return string.Equals(PointsSource,"ada",StringComparison.Ordinal); } }
+        public static string Format(decimal? value,string exact=null,bool available=true)
+        {
+            if (!available) return "-";
+            if (!string.IsNullOrWhiteSpace(exact))
+                return exact.Length<=1024 && Regex.IsMatch(exact,@"^-?[0-9]+(\.[0-9]+)?$") ? exact : "-";
+            return value.HasValue ? value.Value.ToString("0.############################",CultureInfo.InvariantCulture) : "-";
+        }
+    }
+
+    public class ApiCustomer : PointMetadata
     {
         public string Id         { get; set; }
         public string Phone      { get; set; }
@@ -26,14 +46,15 @@ namespace SCCRMonPOS
         public string Tier       { get; set; }
         public bool   IsActive   { get; set; }
         public string MemberCode { get; set; }
-        public int    Balance    { get; set; }
+        public decimal? Balance { get; set; }
+        public bool PointsAvailable { get; set; } = true;
     }
 
-    public class EarnApiResult
+    public class EarnApiResult : PointMetadata
     {
         public string TransactionId  { get; set; }
         public int    PointsAwarded  { get; set; }
-        public int    Balance        { get; set; }
+        public decimal? Balance { get; set; }
         public string Tier           { get; set; }
     }
 
@@ -45,14 +66,14 @@ namespace SCCRMonPOS
 
     // ── New loyalty flow shapes ─────────────────────────────────────────────────
 
-    public class MemberSearchResult
+    public class MemberSearchResult : PointMetadata
     {
         public string Id            { get; set; }
         public string DisplayName   { get; set; }
         public string Phone         { get; set; }
         public string Email         { get; set; }
         public string MemberCode    { get; set; }
-        public int    CurrentPoints { get; set; }
+        public decimal? CurrentPoints { get; set; }
         public bool PointsAvailable { get; set; } = true;
         public bool PharmacyMedRecordAvailable { get; set; } = true;
     }
@@ -99,14 +120,14 @@ namespace SCCRMonPOS
         public LoyaltyClaimItem[] Items            { get; set; }
     }
 
-    public class LoyaltyClaimResponse
+    public class LoyaltyClaimResponse : PointMetadata
     {
         public bool   Ok              { get; set; }
         public string ClaimId         { get; set; }
         public string ReceiptNo       { get; set; }
         public string MemberName      { get; set; }
         public int    AwardedPoints   { get; set; }
-        public int    NewPointsBalance { get; set; }
+        public decimal? NewPointsBalance { get; set; }
     }
 
     public class RefundRegistrationResult
@@ -126,7 +147,7 @@ namespace SCCRMonPOS
         public string NextCursor { get; set; }
     }
 
-    public class PurchaseRecord
+    public class PurchaseRecord : PointMetadata
     {
         public string ClaimId { get; set; }
         public decimal EligibleAmount { get; set; }
@@ -138,7 +159,8 @@ namespace SCCRMonPOS
         public string  BranchCode    { get; set; }
         public string  SoldAt        { get; set; }
         public decimal TotalAmount   { get; set; }
-        public int     AwardedPoints { get; set; }
+        public decimal? AwardedPoints { get; set; }
+        public bool PointsAvailable { get; set; } = true;
         public PurchaseItem[]   Items   { get; set; }
         public PurchaseReturn[] Returns { get; set; }
     }
@@ -164,7 +186,7 @@ namespace SCCRMonPOS
         public string  RefundedAt     { get; set; }
         public decimal RefundTotal    { get; set; }
         public decimal ReturnedQty    { get; set; }
-        public int     PointsReversed { get; set; }
+        public decimal? PointsReversed { get; set; }
     }
 
     public class CreateMemberRequest
@@ -178,7 +200,7 @@ namespace SCCRMonPOS
         public PharmacyMedRecord PharmacyMedRecord { get; set; }
     }
 
-    public class MemberDetail
+    public class MemberDetail : PointMetadata
     {
         public string Id { get; set; }
         public string DisplayName { get; set; }
@@ -187,7 +209,7 @@ namespace SCCRMonPOS
         public string Phone { get; set; }
         public string Email { get; set; }
         public string MemberCode { get; set; }
-        public int    CurrentPoints { get; set; }
+        public decimal? CurrentPoints { get; set; }
         public bool PointsAvailable { get; set; } = true;
         public bool PharmacyMedRecordAvailable { get; set; } = true;
         public string Sex { get; set; }
@@ -345,7 +367,7 @@ namespace SCCRMonPOS
             {
                 TransactionId = dto?.TransactionId ?? "",
                 PointsAwarded = dto?.PointsAwarded ?? 0,
-                Balance       = dto?.Balance       ?? 0,
+                Balance       = dto?.Balance, PointsSource=dto?.PointsSource, PointsStatus=dto?.PointsStatus, BalanceExact=dto?.BalanceExact,
                 Tier          = dto?.Tier          ?? ""
             };
         }
@@ -508,14 +530,14 @@ namespace SCCRMonPOS
 
         // ── New loyalty flow helpers ────────────────────────────────────────────
 
-        [DataContract] private sealed class MemberSearchDto
+        [DataContract] private sealed class MemberSearchDto : PointMetadata
         {
             [DataMember(Name = "id")]            public string Id            { get; set; }
             [DataMember(Name = "displayName")]   public string DisplayName   { get; set; }
             [DataMember(Name = "phone")]         public string Phone         { get; set; }
             [DataMember(Name = "email")]         public string Email         { get; set; }
             [DataMember(Name = "memberCode")]    public string MemberCode    { get; set; }
-            [DataMember(Name = "currentPoints")] public int    CurrentPoints { get; set; }
+            [DataMember(Name = "currentPoints")] public decimal? CurrentPoints { get; set; }
             [DataMember(Name = "pointsAvailable")] public bool? PointsAvailable { get; set; }
             [DataMember(Name = "pharmacyMedRecordAvailable")] public bool? PharmacyMedRecordAvailable { get; set; }
         }
@@ -530,13 +552,13 @@ namespace SCCRMonPOS
             [DataMember(Name = "member")] public MemberSearchDto Member { get; set; }
         }
 
-        [DataContract] private sealed class LoyaltyClaimResponseDto
+        [DataContract] private sealed class LoyaltyClaimResponseDto : PointMetadata
         {
             [DataMember(Name = "ok")]               public bool   Ok               { get; set; }
             [DataMember(Name = "claimId")]          public string ClaimId          { get; set; }
             [DataMember(Name = "receiptNo")]        public string ReceiptNo        { get; set; }
             [DataMember(Name = "awardedPoints")]    public int    AwardedPoints    { get; set; }
-            [DataMember(Name = "newPointsBalance")] public int    NewPointsBalance { get; set; }
+            [DataMember(Name = "newPointsBalance")] public decimal? NewPointsBalance { get; set; }
             [DataMember(Name = "member")]           public LoyaltyClaimMemberDto Member { get; set; }
         }
 
@@ -575,8 +597,9 @@ namespace SCCRMonPOS
             [DataMember(Name = "purchases")] public PurchaseRecordDto[] Purchases { get; set; }
         }
 
-        [DataContract] private sealed class PurchaseRecordDto
+        [DataContract] private sealed class PurchaseRecordDto : PointMetadata
         {
+            [DataMember(Name="pointsAvailable")] public bool? PointsAvailable { get; set; }
             [DataMember(Name = "claimId")] public string ClaimId { get; set; }
             [DataMember(Name = "eligibleAmount")] public decimal EligibleAmount { get; set; }
             [DataMember(Name = "totalAmountSource")] public string TotalAmountSource { get; set; }
@@ -587,7 +610,7 @@ namespace SCCRMonPOS
             [DataMember(Name = "branchCode")]    public string  BranchCode    { get; set; }
             [DataMember(Name = "soldAt")]        public string  SoldAt        { get; set; }
             [DataMember(Name = "totalAmount")]   public decimal TotalAmount   { get; set; }
-            [DataMember(Name = "awardedPoints")] public int     AwardedPoints { get; set; }
+            [DataMember(Name = "awardedPoints")] public decimal? AwardedPoints { get; set; }
             [DataMember(Name = "items")]         public PurchaseItemDto[]   Items   { get; set; }
             [DataMember(Name = "returns")]       public PurchaseReturnDto[] Returns { get; set; }
         }
@@ -613,7 +636,7 @@ namespace SCCRMonPOS
             [DataMember(Name = "refundedAt")]     public string  RefundedAt     { get; set; }
             [DataMember(Name = "refundTotal")]    public decimal RefundTotal    { get; set; }
             [DataMember(Name = "returnedQty")]    public decimal ReturnedQty    { get; set; }
-            [DataMember(Name = "pointsReversed")] public int     PointsReversed { get; set; }
+            [DataMember(Name = "pointsReversed")] public decimal? PointsReversed { get; set; }
         }
 
         private static PurchaseHistoryResult ParsePurchaseHistory(string json)
@@ -669,7 +692,8 @@ namespace SCCRMonPOS
                     BranchCode    = p.BranchCode,
                     SoldAt        = p.SoldAt,
                     TotalAmount   = p.TotalAmount,
-                    AwardedPoints = p.AwardedPoints,
+                    AwardedPoints = p.AwardedPoints, PointsAvailable=p.PointsAvailable ?? true,
+                    PointsSource=p.PointsSource, PointsStatus=p.PointsStatus, AwardedPointsExact=p.AwardedPointsExact,
                     Items         = mappedItems,
                     Returns       = mappedReturns
                 };
@@ -677,7 +701,7 @@ namespace SCCRMonPOS
             return new PurchaseHistoryResult { Purchases = result, HasMore = dto.HasMore, NextCursor = dto.NextCursor };
         }
 
-        [DataContract] private sealed class MemberDetailDto
+        [DataContract] private sealed class MemberDetailDto : PointMetadata
         {
             [DataMember(Name = "id")]             public string Id            { get; set; }
             [DataMember(Name = "display_name")]   public string DisplayName   { get; set; }
@@ -688,8 +712,8 @@ namespace SCCRMonPOS
             [DataMember(Name = "email")]          public string Email         { get; set; }
             [DataMember(Name = "member_code")]    public string MemberCode    { get; set; }
             [DataMember(Name = "memberCode")]     public string MemberCodeCC  { get; set; }
-            [DataMember(Name = "current_points")] public int    CurrentPoints { get; set; }
-            [DataMember(Name = "currentPoints")]  public int    CurrentPointsCC { get; set; }
+            [DataMember(Name = "current_points")] public decimal? CurrentPoints { get; set; }
+            [DataMember(Name = "currentPoints")]  public decimal? CurrentPointsCC { get; set; }
             [DataMember(Name = "pointsAvailable")] public bool? PointsAvailable { get; set; }
             [DataMember(Name = "pharmacyMedRecordAvailable")] public bool? PharmacyMedRecordAvailable { get; set; }
             [DataMember(Name = "sex")]            public string Sex           { get; set; }
@@ -821,8 +845,10 @@ namespace SCCRMonPOS
                 Phone         = m.Phone,
                 Email         = m.Email,
                 MemberCode    = m.MemberCode ?? m.MemberCodeCC,
-                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
+                CurrentPoints = m.CurrentPoints ?? m.CurrentPointsCC,
                 PointsAvailable = m.PointsAvailable ?? true,
+                    PointsSource=m.PointsSource, PointsStatus=m.PointsStatus, PointsObservedAt=m.PointsObservedAt,
+                    BalanceExact=m.BalanceExact,
                 PharmacyMedRecordAvailable = m.PharmacyMedRecordAvailable ?? true,
                 Sex = m.Sex,
                 Dob = m.Dob,
@@ -843,8 +869,10 @@ namespace SCCRMonPOS
                 Phone         = m.Phone,
                 Email         = m.Email,
                 MemberCode    = m.MemberCode ?? m.MemberCodeCC,
-                CurrentPoints = m.CurrentPoints > 0 ? m.CurrentPoints : m.CurrentPointsCC,
+                CurrentPoints = m.CurrentPoints ?? m.CurrentPointsCC,
                 PointsAvailable = m.PointsAvailable ?? true,
+                    PointsSource=m.PointsSource, PointsStatus=m.PointsStatus, PointsObservedAt=m.PointsObservedAt,
+                    BalanceExact=m.BalanceExact,
                 PharmacyMedRecordAvailable = m.PharmacyMedRecordAvailable ?? true
             };
         }
@@ -864,6 +892,8 @@ namespace SCCRMonPOS
                     MemberCode    = dto.MemberCode,
                     CurrentPoints = dto.CurrentPoints,
                     PointsAvailable = dto.PointsAvailable ?? true,
+                    PointsSource=dto.PointsSource, PointsStatus=dto.PointsStatus, PointsObservedAt=dto.PointsObservedAt,
+                    BalanceExact=dto.BalanceExact,
                     PharmacyMedRecordAvailable = dto.PharmacyMedRecordAvailable ?? true
                 };
             }
@@ -879,7 +909,8 @@ namespace SCCRMonPOS
                 Phone         = customer.Phone,
                 Email         = customer.Email,
                 MemberCode    = customer.MemberCode,
-                CurrentPoints = customer.Balance
+                CurrentPoints = customer.Balance, PointsAvailable=customer.PointsAvailable, PointsSource=customer.PointsSource,
+                PointsStatus=customer.PointsStatus, PointsObservedAt=customer.PointsObservedAt, BalanceExact=customer.BalanceExact
             };
         }
 
@@ -1013,6 +1044,8 @@ namespace SCCRMonPOS
                             MemberCode    = dtos[i].MemberCode,
                             CurrentPoints = dtos[i].CurrentPoints,
                             PointsAvailable = dtos[i].PointsAvailable ?? true,
+                    PointsSource=dtos[i].PointsSource, PointsStatus=dtos[i].PointsStatus, PointsObservedAt=dtos[i].PointsObservedAt,
+                    BalanceExact=dtos[i].BalanceExact,
                             PharmacyMedRecordAvailable = dtos[i].PharmacyMedRecordAvailable ?? true
                         };
                     }
@@ -1047,7 +1080,8 @@ namespace SCCRMonPOS
                 ReceiptNo        = dto.ReceiptNo,
                 MemberName       = dto.Member?.DisplayName ?? "",
                 AwardedPoints    = dto.AwardedPoints,
-                NewPointsBalance = dto.NewPointsBalance
+                NewPointsBalance = dto.NewPointsBalance, PointsSource=dto.PointsSource, PointsStatus=dto.PointsStatus,
+                BalanceExact=dto.BalanceExact, AwardedPointsExact=dto.AwardedPointsExact, PointsCredited=dto.PointsCredited
             };
         }
 
@@ -1158,8 +1192,9 @@ namespace SCCRMonPOS
         }
 
         [DataContract]
-        private sealed class CustomerDto
+        private sealed class CustomerDto : PointMetadata
         {
+            [DataMember(Name="pointsAvailable")] public bool? PointsAvailable { get; set; }
             [DataMember(Name = "id")]          public string Id         { get; set; }
             [DataMember(Name = "phone")]       public string Phone      { get; set; }
             [DataMember(Name = "full_name")]   public string FullName   { get; set; }
@@ -1167,15 +1202,15 @@ namespace SCCRMonPOS
             [DataMember(Name = "tier")]        public string Tier       { get; set; }
             [DataMember(Name = "is_active")]   public bool   IsActive   { get; set; }
             [DataMember(Name = "member_code")] public string MemberCode { get; set; }
-            [DataMember(Name = "balance")]     public int    Balance    { get; set; }
+            [DataMember(Name = "balance")]     public decimal? Balance { get; set; }
         }
 
         [DataContract]
-        private sealed class EarnDto
+        private sealed class EarnDto : PointMetadata
         {
             [DataMember(Name = "transactionId")]  public string TransactionId  { get; set; }
             [DataMember(Name = "pointsAwarded")]  public int    PointsAwarded  { get; set; }
-            [DataMember(Name = "balance")]        public int    Balance        { get; set; }
+            [DataMember(Name = "balance")]        public decimal? Balance { get; set; }
             [DataMember(Name = "tier")]           public string Tier           { get; set; }
         }
 
@@ -1217,7 +1252,8 @@ namespace SCCRMonPOS
                 Tier       = c.Tier,
                 IsActive   = c.IsActive,
                 MemberCode = c.MemberCode,
-                Balance    = c.Balance
+                Balance    = c.Balance, PointsAvailable=c.PointsAvailable ?? true, PointsSource=c.PointsSource,
+                PointsStatus=c.PointsStatus, PointsObservedAt=c.PointsObservedAt, BalanceExact=c.BalanceExact
             };
         }
 

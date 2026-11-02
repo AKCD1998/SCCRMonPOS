@@ -323,6 +323,7 @@ namespace SCCRMonPOS
                 PurchaseHistoryResult history = await _api.GetMemberPurchaseHistoryPageAsync(memberId, append ? _nextCursor : null);
                 if (IsDisposed || generation != _historyGeneration) return;
                 PurchaseRecord[] purchases = history?.Purchases ?? new PurchaseRecord[0];
+                if(Array.Exists(purchases,p=>p.UsesAdaPoints)) _dgvPurchases.Columns["points"].HeaderText="แต้มจาก Ada";
 
                 foreach (PurchaseRecord p in purchases)
                 {
@@ -331,8 +332,8 @@ namespace SCCRMonPOS
                         FormatDate(p.SoldAt),
                         p.ReceiptNo ?? "",
                         p.BranchCode ?? "",
-                        p.TotalAmount.ToString("N2", CultureInfo.InvariantCulture) + (p.TotalAmountSource == "pos_header" ? "" : " *"),
-                        p.AwardedPoints.ToString(CultureInfo.InvariantCulture),
+                        p.TotalAmount.ToString("N2", CultureInfo.InvariantCulture) + (p.TotalAmountSource == "pos_header" || p.TotalAmountSource == "ada_header" ? "" : " *"),
+                        PointMetadata.Format(p.AwardedPoints,p.AwardedPointsExact,p.PointsAvailable),
                         (p.Returns != null && p.Returns.Length > 0) ? p.Returns.Length.ToString() : "-");
                     // SelectionChanged fires during Add; the record must already be attached.
                     row.Tag = p;
@@ -380,8 +381,8 @@ namespace SCCRMonPOS
 
             if (p == null) { ClearDetails(); return; }
             _lblReceipt.Text = "สาขา " + p.BranchCode + " | เครื่อง " + (p.PosCode ?? "-") + " | ผู้ขาย " + (p.ReceiptCashierCode ?? "-") +
-                " | ยอดคิดแต้ม " + p.EligibleAmount.ToString("N2") + " | ส่วนลดบิล " + (p.ReceiptDiscount.HasValue ? p.ReceiptDiscount.Value.ToString("N2") : "-") +
-                (p.TotalAmountSource == "pos_header" ? "" : "\n* บิลรุ่นเก่า: ยอดจากรายการที่บันทึกไว้ ไม่มียอดชำระต้นฉบับจาก POS");
+                (p.UsesAdaPoints ? " | แต้มจาก Ada " + PointMetadata.Format(p.AwardedPoints,p.AwardedPointsExact,p.PointsAvailable) : " | ยอดคิดแต้ม " + p.EligibleAmount.ToString("N2")) + " | ส่วนลดบิล " + (p.ReceiptDiscount.HasValue ? p.ReceiptDiscount.Value.ToString("N2") : "-") +
+                (p.TotalAmountSource == "pos_header" || p.TotalAmountSource == "ada_header" ? "" : "\n* บิลรุ่นเก่า: ยอดจากรายการที่บันทึกไว้ ไม่มียอดชำระต้นฉบับจาก POS");
 
             _lvItems.BeginUpdate();
             _lvItems.Items.Clear();
@@ -412,7 +413,7 @@ namespace SCCRMonPOS
                     row.SubItems.Add(r.RefundDocNo ?? "");
                     row.SubItems.Add(r.RefundTotal.ToString("N2", CultureInfo.InvariantCulture));
                     row.SubItems.Add(TrimNum(r.ReturnedQty));
-                    row.SubItems.Add(r.PointsReversed.ToString(CultureInfo.InvariantCulture));
+                    row.SubItems.Add(PointMetadata.Format(r.PointsReversed));
                     _lvReturns.Items.Add(row);
                 }
             }
