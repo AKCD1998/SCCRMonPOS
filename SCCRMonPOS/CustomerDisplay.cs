@@ -8,6 +8,32 @@ using System.Xml.Linq;
 
 namespace SCCRMonPOS
 {
+    internal static class RegistrationOrigin
+    {
+        // Fixed approved identities, independent of SQL endpoints and copied settings.
+        internal static string ForNode(string nodeId)
+        {
+            switch (nodeId)
+            {
+                case "nKAsnKMrkZ11CNTRL": return "001-001";
+                case "nEdQXowQ4t11CNTRL": return "001-002";
+                case "nFCuxvTVA521CNTRL": return "003-001";
+                case "nFQPDepQTh11CNTRL": return "003-002";
+                case "n3AqXUmdkF11CNTRL": return "004-001";
+                case "noJJCWPrL221CNTRL": return "004-002";
+                case "nSKeeNSVgt11CNTRL": return "005-001";
+                case "nkbfkybTAP11CNTRL": return "005-002";
+                default: return null;
+            }
+        }
+        internal static string Url(string referralCode)
+        {
+            if (!new[] { "001-001", "001-002", "003-001", "003-002", "004-001", "004-002", "005-001", "005-002" }.Contains(referralCode))
+                throw new InvalidOperationException("ไม่พบสาขาของเครื่องนี้ กรุณาติดต่อผู้ดูแลก่อนแสดง QR");
+            return CustomerDisplayController.RegistrationUrl + "/r/" + referralCode;
+        }
+    }
+
     public sealed class CustomerDisplayController : IDisposable
     {
         public const string RegistrationUrl = "https://sc-official-website.onrender.com/join";
@@ -27,6 +53,8 @@ namespace SCCRMonPOS
 
         public void ShowOn(Screen screen, IWin32Window cashier)
         {
+            string referralCode = RegistrationOrigin.ForNode(DeviceAccessGuard.CurrentDevice?.NodeId);
+            RegistrationOrigin.Url(referralCode); // fail closed before changing any window
             if (screen == null || screen.DeviceName == Screen.FromHandle(cashier.Handle).DeviceName)
                 throw new InvalidOperationException("กรุณาเลือกจอลูกค้าที่แยกจากจอพนักงาน (Windows: ขยายจอภาพ)");
             // Remember a device name, never an array index that changes after reconnect.
@@ -34,7 +62,7 @@ namespace SCCRMonPOS
             new XDocument(new XElement("display", new XAttribute("device", screen.DeviceName))).Save(_settingsPath);
             PreferredDevice = screen.DeviceName;
             Hide();
-            _window = new CustomerQrForm { StartPosition = FormStartPosition.Manual, Bounds = screen.Bounds };
+            _window = new CustomerQrForm(referralCode) { StartPosition = FormStartPosition.Manual, Bounds = screen.Bounds };
             _window.Show();
             try { _overlay = new CashierQrOverlay(Screen.FromHandle(cashier.Handle).Bounds, Hide); }
             catch { Hide(); throw; }
@@ -60,21 +88,23 @@ namespace SCCRMonPOS
     public sealed class CustomerQrForm : Form
     {
         private readonly Image _qr;
+        private readonly string _registrationUrl;
         protected override bool ShowWithoutActivation { get { return true; } }
         protected override CreateParams CreateParams
         {
             get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000; return cp; }
         }
 
-        public CustomerQrForm()
+        public CustomerQrForm(string referralCode)
         {
+            _registrationUrl = RegistrationOrigin.Url(referralCode);
             Text = "SCCRM — สมัครสมาชิก";
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             DoubleBuffered = true;
             BackColor = Color.White;
-            using (var stream = typeof(CustomerQrForm).Assembly.GetManifestResourceStream("SCCRMonPOS.RegistrationQr.png"))
+            using (var stream = typeof(CustomerQrForm).Assembly.GetManifestResourceStream("SCCRMonPOS.RegistrationQr." + referralCode + ".png"))
             using (var source = Image.FromStream(stream)) _qr = new Bitmap(source);
         }
 
@@ -100,7 +130,7 @@ namespace SCCRMonPOS
                 g.DrawImage(_qr, new Rectangle((w - size) / 2, (int)(h * .235f), size, size));
                 g.DrawString("กรอกชื่อ นามสกุล และเบอร์โทรศัพท์ แล้วกดยืนยัน", body, dark, new RectangleF(0, h * .82f, w, h * .07f), center);
                 g.DrawString("เปิดด้วยมือถือได้เลย", body, blue, new RectangleF(0, h * .89f, w, h * .055f), center);
-                g.DrawString(CustomerDisplayController.RegistrationUrl, small, dark, new RectangleF(0, h * .95f, w, h * .035f), center);
+                g.DrawString(_registrationUrl, small, dark, new RectangleF(0, h * .95f, w, h * .035f), center);
             }
         }
 
