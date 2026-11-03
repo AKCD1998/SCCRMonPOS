@@ -1,0 +1,33 @@
+name: HQ point-sync checks
+on:
+  pull_request:
+    paths: ['sync-agent/points/**', 'sync-agent/test/ada-point*.test.cjs', 'sync-agent/test/ada-native-points*.test.cjs', 'sync-agent/test/point-native-target-check.ps1', 'sync-agent/package*.json', '.github/workflows/points-ci.yml']
+  push:
+    branches: [master]
+    paths: ['sync-agent/points/**', 'sync-agent/test/ada-point*.test.cjs', 'sync-agent/test/ada-native-points*.test.cjs', 'sync-agent/test/point-native-target-check.ps1', 'sync-agent/package*.json', '.github/workflows/points-ci.yml']
+permissions:
+  contents: read
+jobs:
+  point-boundaries:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: sync-agent
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sync-agent/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Native ownership, endpoint, projection and worker guards
+        run: node --test test/ada-native-points-model.test.cjs test/ada-native-points-export.test.cjs test/ada-native-points-compensation.test.cjs test/ada-point-projection.test.cjs test/ada-point-native-target.test.cjs test/ada-point-delivery.test.cjs test/ada-point-worker.test.cjs test/ada-point-service-boot.test.cjs
+      - name: Parse production point-service PowerShell
+        run: |
+          Get-ChildItem points/*.ps1 | ForEach-Object {
+            $pointTokens=$null; $pointErrors=$null
+            [Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$pointTokens,[ref]$pointErrors) | Out-Null
+            if (@($pointErrors).Count) { throw ($pointErrors | Out-String) }
+          }

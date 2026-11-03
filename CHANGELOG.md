@@ -9,6 +9,8 @@
   database, restricted login/SID and allowed-action checks unchanged.
 - Add 55 offline target-boundary checks covering named/legacy endpoints and
   rejected hosts, instances, ports, databases, identities, credentials and actions.
+- Run the point model, ownership, endpoint and worker guards in a focused Windows
+  CI workflow without production credentials or database access.
 - Document named-instance service configuration for SQL Express port changes.
   Production rollout and readback remain separate operator checks.
 
