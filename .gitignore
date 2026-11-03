@@ -16,3 +16,6 @@ SCCRMonPOS/SCCRMonPOS.secrets.config
 build-verify/
 Backup_*/
 *.exe.config
+
+# Local Supabase CLI cache
+supabase/.temp/

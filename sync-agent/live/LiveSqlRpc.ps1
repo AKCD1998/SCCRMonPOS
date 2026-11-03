@@ -21,6 +21,12 @@ try{
    default {throw 'ACTION_REFUSED'}
   }
   [Console]::WriteLine(([ordered]@{id=$req.id;ok=$true;rows=$rows}|ConvertTo-Json -Depth 7 -Compress))
- }catch{$code='SOURCE_OPERATION_FAILED';if($_.Exception.GetBaseException().Message -match '([A-Z][A-Z_]{6,})'){$code=$Matches[1]};[Console]::WriteLine(([ordered]@{id=$req.id;ok=$false;code=$code}|ConvertTo-Json -Compress))}}
+ }catch{$base=$_.Exception.GetBaseException();$code='SOURCE_OPERATION_FAILED';$connectionLost=$false
+  if($base -is [Data.SqlClient.SqlException] -and $base.Number -in @(-1,2,20,53,64,233,10053,10054,10060,11001)){$code='SOURCE_PROCESS_ENDED';$connectionLost=$true}
+  elseif($base -is [Data.SqlClient.SqlException] -and $base.Number -in @(1205,1222)){$code='MEMBER_CREATE_BUSY'}
+  elseif($base -is [Data.SqlClient.SqlException] -and $base.Number -eq -2){$code='SOURCE_TIMEOUT';$connectionLost=$true}
+  elseif($base.Message -match '([A-Z][A-Z_]{6,})'){$code=$Matches[1]}
+  [Console]::WriteLine(([ordered]@{id=$req.id;ok=$false;code=$code}|ConvertTo-Json -Compress));if($connectionLost){break}
+ }}
 }catch{[Console]::WriteLine(([ordered]@{ok=$false;code='LIVE_SOURCE_START_FAILED';type=$_.Exception.GetBaseException().GetType().Name}|ConvertTo-Json -Compress));exit 1}
 finally{if($db){$db.Dispose()};if($b){$b.Password=''};$password=$null}

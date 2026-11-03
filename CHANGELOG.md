@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### 2026-11-03 — Fast HQ member creation and existing-member linking
+
+- Poll membership every two seconds on independent PG/SQL connections so the
+  five-minute purchase-history import cannot delay registration.
+- Publish an existing Ada AR code after a fresh, exact personal identity match
+  or an explicit admin link. Preserve registered UUIDs, login, SCM lookup aliases,
+  all approved history links and original Ada profiles; hold ambiguous identities.
+- Add isolated-copy checks for restricted capabilities, replay, source/member
+  changes, customer/account conflicts and independent worker scheduling.
+- Bind automatic existing-customer linkage to verified staff-device provenance
+  or a login-free QR contact; app/email login claims still require explicit
+  admin confirmation before access to old customer history.
+- Keep legacy publication separate from new-member branch delivery. Document
+  latency targets, offline/review exceptions, status and service-only rollback.
+
 ### 2026-11-03 — HQ point-sync named SQL instances
 
 - Accept each verified branch SQL named instance in the native point receiver
