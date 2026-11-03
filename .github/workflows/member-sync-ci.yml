@@ -1,10 +1,10 @@
 name: HQ member-sync checks
 on:
   pull_request:
-    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/*hq_member_fast_existing_links.sql', '.github/workflows/member-sync-ci.yml']
+    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/**', '.github/workflows/member-sync-ci.yml']
   push:
     branches: [master]
-    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/*hq_member_fast_existing_links.sql', '.github/workflows/member-sync-ci.yml']
+    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/**', '.github/workflows/member-sync-ci.yml']
 permissions:
   contents: read
 jobs:

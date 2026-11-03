@@ -18,7 +18,12 @@ The private migration adds a narrow capability for `sccrm_hq_live_sync` only.
 An active personal Ada customer may be linked automatically when normalized
 name and telephone agree, other supplied personal data do not conflict, and
 there is exactly one unowned code or one previously consolidated synthetic
-identity. The selected customer is read again from the pinned HQ SQL source
+identity. Automatic matches additionally require a verified staff-device
+registration or a public QR contact with no email, password, verification or
+portal session. A self-claimed app/email login requires explicit admin linkage
+and cannot obtain old purchase history from a name/phone match. Linking never
+upgrades a QR contact's authentication or fills in its login email.
+The selected customer is read again from the pinned HQ SQL source
 without PIN before publication. A stale source/member fingerprint aborts.
 
 If a synthetic imported contact owns the code, the registered SCCRM UUID and
@@ -41,8 +46,10 @@ An expired legacy Ada card is not renewed as a side effect of linking.
 
 ## Installation, status and rollback
 
-1. Apply `supabase/migrations/20261103035705_hq_member_fast_existing_links.sql`
-   only after the isolated-copy proof passes with the exact migration digest.
+1. Apply all three ordered `supabase/migrations` scripts for fast existing
+   links, the temporary publication fence, and registration provenance. The
+   final script safely restores the narrowly scoped publication grant.
+   Apply only after the isolated-copy proof passes with the exact file digests.
    The private schemas and dedicated runtime role must already be owned.
 2. Back up the owned HQ package and manifest. Replace only the reviewed live
    worker, RPC, scheduler, existing-member helper and polling configuration.

@@ -11,6 +11,9 @@
   all approved history links and original Ada profiles; hold ambiguous identities.
 - Add isolated-copy checks for restricted capabilities, replay, source/member
   changes, customer/account conflicts and independent worker scheduling.
+- Bind automatic existing-customer linkage to verified staff-device provenance
+  or a login-free QR contact; app/email login claims still require explicit
+  admin confirmation before access to old customer history.
 - Keep legacy publication separate from new-member branch delivery. Document
   latency targets, offline/review exceptions, status and service-only rollback.
 
