@@ -1,0 +1,44 @@
+name: HQ member-sync checks
+on:
+  pull_request:
+    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/*hq_member_fast_existing_links.sql', '.github/workflows/member-sync-ci.yml']
+  push:
+    branches: [master]
+    paths: ['sync-agent/live/**', 'sync-agent/test/live-member*', 'sync-agent/test/live-existing*', 'supabase/migrations/*hq_member_fast_existing_links.sql', '.github/workflows/member-sync-ci.yml']
+permissions:
+  contents: read
+jobs:
+  isolated-copy:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.1
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['127.0.0.1:55513:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: sync-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sync-agent/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Scheduler and restricted-copy reconciliation
+        env:
+          SCCRM_LIVE_MEMBER_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55513/postgres
+        run: node --test test/live-member-fast.test.cjs test/live-existing-links-copy.test.cjs member-codes/assignment.test.cjs
+  native-script-parse:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse native RPC without opening a database
+        shell: pwsh
+        run: |
+          $memberTokens=$null; $memberErrors=$null
+          [Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'sync-agent/live/LiveSqlRpc.ps1'),[ref]$memberTokens,[ref]$memberErrors) | Out-Null
+          if (@($memberErrors).Count) { throw ($memberErrors | Out-String) }
