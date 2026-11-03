@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 2026-11-03 — Recover branch member delivery after SQL transport failures
+
+- Preserve the outer SQL provider error when an inner Win32 error exists, so
+  disconnects/timeouts reconnect and retry the same owned assignment. Keep
+  authentication, permission and customer-identity conflicts held for review.
+- Report unknown SQL error numbers without server/customer/credential messages.
+  Expose held AR deliveries in worker status and mark them attention-required
+  instead of healthy. No Ada profile overwrite, code change or point change.
+- Add real nested SqlException fixtures and exact-packet reconnect checks.
+  Copy acceptance and production readback remain separate rollout evidence.
+
 ### 2026-11-03 — 1.3.17 Terminal-specific registration QR
 
 - Show a QR assigned to the approved branch/POS node so customer self-signup

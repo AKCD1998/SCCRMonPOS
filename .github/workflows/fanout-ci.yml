@@ -61,3 +61,6 @@ jobs:
           $fanoutExe=Join-Path (Get-Location) 'SCCRMHQMemberFanout-check.exe'
           & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /target:exe /reference:System.ServiceProcess.dll /out:$fanoutExe $fanoutSource
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Nested SQL provider failure classification without live connections
+        shell: powershell
+        run: ./sync-agent/member-codes/Test-SqlFailureRecovery.ps1
