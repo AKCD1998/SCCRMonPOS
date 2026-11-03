@@ -63,11 +63,14 @@ try {
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/receipt-scope-check/ReceiptScopeCheck.exe') @()
         Invoke-PosCommand $posMsbuild @('tools/ReceiptClaimStatusCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         Invoke-PosCommand (Join-Path $posRoot 'build-verify/receipt-claim-status-check/ReceiptClaimStatusCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/FleetUpdateCheck.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
+        Invoke-PosCommand (Join-Path $posRoot 'build-verify/fleet-update-check/FleetUpdateCheck.exe') @()
+        Invoke-PosCommand $posMsbuild @('tools/FleetConsole.csproj','/t:Build','/p:Configuration=Release','/nologo','/v:minimal')
         $posExe = Join-Path $posStage 'SCCRMonPOS.exe'
         Copy-Item -LiteralPath 'SCCRMonPOS/bin/Release/SCCRMonPOS.exe' -Destination $posExe
         $posManifest = Join-Path $posStage 'stable.json'
         $posPayload = [ordered]@{
-            schemaVersion = 1; releaseId = $ReleaseId; version = $Version; deviceAccessVersion = 1; adaposSetupVersion = 1
+            schemaVersion = 1; releaseId = $ReleaseId; version = $Version; deviceAccessVersion = 1; adaposSetupVersion = 1; fleetProtocolVersion = 1
             downloadUrl = "https://github.com/$posRepository/releases/download/$ReleaseId/SCCRMonPOS.exe"
             sha256 = (Get-FileHash -LiteralPath $posExe -Algorithm SHA256).Hash.ToLowerInvariant()
             size = (Get-Item -LiteralPath $posExe).Length; notes = $posNotes

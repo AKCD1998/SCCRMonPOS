@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### 2026-11-03 — 1.3.15 Administrator-requested branch updates
+
+- Add a SCProductDev console for explicit per-terminal update commands and a
+  persistent backend queue. Release notifications alone never install updates.
+- Receive only authenticated device-specific commands, verify signed releases,
+  and wait for unsaved receipts, member forms, API calls, customer QR display
+  and refund work before reopening only SCCRM through its existing updater.
+- Retain offline commands and staged files across restart, reuse lost-response
+  requests, verify the running binary before reporting success, and expose
+  non-secret device identity for scoped SMB diagnostics.
+- Add copy-only queue and native replacement checks. Existing clients require
+  one first installation; a real POS version transition is a separate release
+  acceptance check and is not asserted by this entry.
+
 ### 2026-11-03 — HQ point-sync named SQL instances
 
 - Accept each verified branch SQL named instance in the native point receiver

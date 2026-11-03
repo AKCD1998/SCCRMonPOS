@@ -21,6 +21,7 @@ namespace SCCRMonPOS.Updates
         [DataMember(Name = "sourceCommit")] public string SourceCommit { get; set; }
         [DataMember(Name = "publishedAt")] public string PublishedAt { get; set; }
         [DataMember(Name = "deviceAccessVersion")] public int DeviceAccessVersion { get; set; }
+        [DataMember(Name = "fleetProtocolVersion")] public int FleetProtocolVersion { get; set; }
 
         public void RequireDeviceAccess()
         {

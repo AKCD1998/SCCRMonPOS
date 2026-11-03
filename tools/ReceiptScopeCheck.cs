@@ -77,6 +77,13 @@ internal static class ReceiptScopeCheck
             using (var display = new CustomerDisplayController(Path.Combine(root, "display")))
             using (var form = new MemberClaimForm(new ApiClient("http://127.0.0.1:1"), watcher, 25, "synthetic", Receipt(scope.BranchCode, scope.PosCode), display))
             {
+                Check(!form.ReadyForAdminUpdate, "admin update waits for loaded unconfirmed receipt before member selection");
+                typeof(MemberClaimForm).GetField("_claimCompleted", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, true);
+                Check(form.ReadyForAdminUpdate, "confirmed receipt permits admin update after API completion");
+                typeof(MemberClaimForm).GetField("_uiBusy", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, true);
+                Check(!form.ReadyForAdminUpdate, "active member work blocks admin update even with confirmed receipt");
+                typeof(MemberClaimForm).GetField("_uiBusy", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, false);
+                typeof(MemberClaimForm).GetField("_claimCompleted", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(form, false);
                 Call(form, "AddMemberRow", new MemberSearchResult { Id = "fixture", DisplayName = "Fixture", PointsAvailable = true });
                 Call(form, "SelectMemberAtRow", 0);
                 // This suite isolates register ownership. The loopback status suite

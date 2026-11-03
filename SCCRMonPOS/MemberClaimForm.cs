@@ -22,6 +22,11 @@ namespace SCCRMonPOS
         private bool UsesAdaPoints { get { return _adaPointsMode || _selectedMember?.UsesAdaPoints == true; } }
         private bool _uiBusy;
         private bool _claimCompleted;
+        public bool ReadyForAdminUpdate
+        {
+            get { return !_uiBusy && !_receiptStatusChecking && !(_receipt != null &&
+                !_claimCompleted && _receiptClaimStatus?.Claimed != true) && OwnedForms.Length == 0; }
+        }
         private ReceiptClaimStatus _receiptClaimStatus;
         private bool _receiptStatusVerified, _receiptStatusChecking, _receiptStatusError;
         private int _receiptStatusGeneration;
