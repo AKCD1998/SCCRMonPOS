@@ -16,8 +16,8 @@ class CodeRpc{
  close(){this.fail('CONNECTION_CLOSED');}
 }
 class Connection{
- constructor(config,role){this.config=config;this.role=role;this.rpc=null;}
- async query(action,packet,signal){try{if(!this.rpc||this.rpc.closed)this.rpc=new CodeRpc({...this.config,role:this.role});return await this.rpc.query(action,packet,signal);}catch(e){if(this.rpc?.closed||/OFFLINE|TIMEOUT|CONNECTION|RPC_PROCESS/.test(e.code||'')){this.rpc?.close();this.rpc=null;}throw e;}}
+ constructor(config,role,createRpc=options=>new CodeRpc(options)){this.config=config;this.role=role;this.rpc=null;this.createRpc=createRpc;}
+ async query(action,packet,signal){try{if(!this.rpc||this.rpc.closed)this.rpc=this.createRpc({...this.config,role:this.role});return await this.rpc.query(action,packet,signal);}catch(e){if(this.rpc?.closed||/OFFLINE|TIMEOUT|CONNECTION|RPC_PROCESS/.test(e.code||'')){this.rpc?.close();this.rpc=null;}throw e;}}
  close(){this.rpc?.close();this.rpc=null;}
 }
 class AssignmentSource extends Connection{
@@ -46,4 +46,4 @@ class AssignedReceiver extends Connection{
 class CopyCreator extends Connection{constructor(config){if(config.mode!=='copy')throw Error('CODE_CREATOR_COPY_ONLY');super(config,'creator');}async create(memberId,profile){return this.query('create',{memberId,profile});}}
 // Operator-only credentials are never included in the service's secret bundle.
 class HqMigrationAuthority extends Connection{constructor(config){if(config.connection.branchCode!=='000')throw Error('CODE_MIGRATION_HQ_ONLY');super(config,'authority');}async migrate({memberId,previousCode,profile}){if(previousCode!==legacyScCodeFor(memberId))throw Error('CODE_MIGRATION_IDENTITY_REFUSED');return this.query('migrate',{memberId,previousCode,profile});}}
-module.exports={CodeRpc,AssignmentSource,AssignmentAuthority,AssignedReceiver,CopyCreator,HqMigrationAuthority};
+module.exports={CodeRpc,Connection,AssignmentSource,AssignmentAuthority,AssignedReceiver,CopyCreator,HqMigrationAuthority};

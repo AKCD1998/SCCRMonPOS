@@ -2,8 +2,41 @@ param()
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding=[Text.Encoding]::UTF8;[Console]::OutputEncoding=[Text.Encoding]::UTF8
 $db=$null;$builder=$null;$init=$null;$connection=$null
-function Safe-Code($record){$base=$record.Exception.GetBaseException();if($base -is [Data.SqlClient.SqlException]){if($base.Number -in @(1205,1222)){return 'TARGET_BUSY'};if($base.Number -eq -2){return 'SQL_TIMEOUT'};if($base.Number -in @(-1,2,20,53,64,233,10053,10054,10060,11001)){return 'TARGET_OFFLINE'}};if($base.Message -cmatch '\b([A-Z][A-Z0-9_]{5,79})\b'){return $Matches[1]};return 'CODE_OPERATION_REVIEW'}
+function Safe-Code($record){
+ # GetBaseException() can discard SqlException and its Number when the inner
+ # error is Win32Exception. Keep the provider error, and never emit raw messages.
+ $errors=@();$error=$record.Exception
+ for($depth=0;$error -and $depth -lt 16;$depth++){$errors+=,$error;$error=$error.InnerException}
+ foreach($error in $errors){
+  if($error -is [Data.SqlClient.SqlException]){
+   foreach($detail in $error.Errors){
+    if($detail.Message -cmatch '^(MEMBER_CODES_[A-Z0-9_]{1,65})$'){return $Matches[1]}
+   }
+   if($error.Number -in @(1205,1222)){return 'TARGET_BUSY'}
+   if($error.Number -eq -2){return 'SQL_TIMEOUT'}
+   if($error.Number -in @(-1,2,20,53,64,121,233,10053,10054,10060,10061,11001)){return 'TARGET_OFFLINE'}
+  }
+ }
+ foreach($error in $errors){
+  if($error -is [ComponentModel.Win32Exception] -and $error.NativeErrorCode -in @(2,53,64,121,233,258,10053,10054,10060,10061,11001)){
+   # An authentication/permission/certificate SQL error is never downgraded to
+   # a transport retry just because an inner operating-system error exists.
+   $sql=@($errors|Where-Object{$_ -is [Data.SqlClient.SqlException]})
+   if(!$sql.Count -or $sql[0].Number -in @(0,-1,20,53,64,121,233,258,10053,10054,10060,10061,11001)){return 'TARGET_OFFLINE'}
+  }
+ }
+ foreach($error in $errors){
+  if($error -is [Data.SqlClient.SqlException]){
+   if($error.Number -lt 0){return 'SQL_ERROR_NEG_'+[Math]::Abs([long]$error.Number)}
+   return 'SQL_ERROR_'+$error.Number
+  }
+  if($error.Message -cmatch '^((?:CODE|CONNECTION|TARGET|SERVICE)_[A-Z0-9_]{1,65})$'){return $Matches[1]}
+ }
+ if($db -and $db.State -in @([Data.ConnectionState]::Closed,[Data.ConnectionState]::Broken)){return 'CONNECTION_CLOSED'}
+ return 'CODE_OPERATION_REVIEW'
+}
 function Query([string]$sql,[hashtable]$parameters=@{}){
+ if($db.State -ne [Data.ConnectionState]::Open){throw 'CONNECTION_CLOSED'}
  $q=$db.CreateCommand();$q.CommandTimeout=5;$q.CommandText=$sql
  try{foreach($key in $parameters.Keys){$value=$parameters[$key];if($null -eq $value){$value=[DBNull]::Value}
   if($key -in @('assignmentId','memberId')){$p=$q.Parameters.Add('@'+$key,[Data.SqlDbType]::UniqueIdentifier)}

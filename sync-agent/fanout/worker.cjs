@@ -45,6 +45,13 @@ async function catchUpEnabledTargets(queue){
  return {targets:enabled.length,enqueued,limitPerTarget:100};
 }
 function writeStatus(state){const dir=path.join(ROOT,'status');const temp=path.join(dir,'status.next.json');fs.writeFileSync(temp,JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,...state}));fs.renameSync(temp,path.join(dir,'status.json'));}
+function deliveryHealth({paused,lastSourceError,codeTargetError,targets=[],memberCodes={}}){
+ if(codeTargetError)return 'blocked';
+ if(paused)return 'paused';
+ if(lastSourceError||memberCodes.lastSourceError)return 'source-retrying';
+ if([...targets,...(memberCodes.targets||[])].some(t=>Number(t.review)>0))return 'attention-required';
+ return 'healthy';
+}
 function createLifecycle(engine,codeResources){
  let codeRunning=false;return {async sync(paused){if(paused){const tasks=[];if(!engine.stopped)tasks.push(engine.stop());if(codeRunning)tasks.push(codeResources.runtime.stop().finally(()=>{codeRunning=false;}));const results=await Promise.allSettled(tasks);const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;}else{if(engine.stopped)engine.start();if(codeResources&&!codeRunning){codeResources.runtime.start();codeRunning=true;}}}};
 }
@@ -79,10 +86,16 @@ async function run(){
     try{lastScan=await scanOnce(source,queue,config.heldSourceIds||{});lastSourceError=null;}catch(e){lastSourceError=safeCode(e);}
     lastCatchup=await catchUpEnabledTargets(queue);
    }
-   if(Date.now()-lastStatus>=5000){writeStatus({state:paused?'paused':lastSourceError?'source-retrying':'healthy',lastScan,lastCatchup,lastSourceError,lastError,codeTargetError,memberCodes:codeResources?{enabled:true,...await codeResources.runtime.status()}:{enabled:false},targets:await queue.status(),sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows});lastStatus=Date.now();}
+   if(Date.now()-lastStatus>=5000){
+    const memberCodes=codeResources?{enabled:true,...await codeResources.runtime.status()}:{enabled:false};
+    const targets=await queue.status();
+    writeStatus({state:deliveryHealth({paused,lastSourceError,codeTargetError,targets,memberCodes}),lastScan,lastCatchup,lastSourceError,lastError,codeTargetError,memberCodes,targets,
+     sourceCheckpoint:await queue.getSourceCheckpoint(),heldSources:(await pool.query("SELECT member_id,hq_code,last_code FROM sccrm_fanout.sources WHERE state='review' ORDER BY member_id LIMIT 100")).rows,
+     reviewJobs:(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_fanout.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows,
+     memberCodeReviewJobs:codeResources?(await pool.query("SELECT target_id,member_id,hq_code,last_code,attempt_count FROM sccrm_member_codes.jobs WHERE state='review' ORDER BY id LIMIT 100")).rows:[]});lastStatus=Date.now();}
    for(let i=0;i<10&&!stopping&&!fs.existsSync(stopFile);i++)await new Promise(resolve=>setTimeout(resolve,100));
   }
  }finally{try{await shutdownResources({engine,codeResources,source,adapters,pool});}finally{writeStatus({state:'stopped'});}}
 }
 if(require.main===module)run().catch(e=>{try{writeStatus({state:'blocked',code:safeCode(e)});}catch{}process.exitCode=1;});
-module.exports={validate,validateMemberCodes,scanOnce,catchUpEnabledTargets,createLifecycle,shutdownResources,run,FIXTURE_ID};
+module.exports={validate,validateMemberCodes,scanOnce,catchUpEnabledTargets,createLifecycle,shutdownResources,deliveryHealth,run,FIXTURE_ID};
