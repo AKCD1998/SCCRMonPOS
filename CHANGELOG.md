@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-11-03 — 1.3.17 Terminal-specific registration QR
+
+- Show a QR assigned to the approved branch/POS node so customer self-signup
+  records its source automatically, without selecting a branch on the phone.
+- Bundle all eight QR assets offline and verify decoded URLs and native identity
+  mapping. Unknown origins stop before showing a customer sign. Keep the cashier
+  overlay, manual close and administrator-requested update save barrier intact.
+- Source tracking requires the corresponding website deployment. Publishing and
+  actual fleet installation are separate rollout checks; no commands are implicit.
+
 ### 2026-11-03 — 1.3.16 Fleet pilot target
 
 - Prepare a distinct signed version for verifying the first administrator-issued

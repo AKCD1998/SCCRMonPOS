@@ -52,6 +52,7 @@ internal static class DesktopFeatureCheck
                     Polling(root, key).GetAwaiter().GetResult();
                 }
                 RenderPreviews();
+                RegistrationOrigins();
                 MemberSelection();
                 CashierWindowSwitching();
             }
@@ -181,11 +182,35 @@ internal static class DesktopFeatureCheck
         finally { foreach(var service in services) service.Dispose(); }
     }
 
+    private static void RegistrationOrigins()
+    {
+        stage = "terminal-referral-origin-and-bundled-assets";
+        var expected = new Dictionary<string,string> {
+            {"nKAsnKMrkZ11CNTRL","001-001"}, {"nEdQXowQ4t11CNTRL","001-002"},
+            {"nFCuxvTVA521CNTRL","003-001"}, {"nFQPDepQTh11CNTRL","003-002"},
+            {"n3AqXUmdkF11CNTRL","004-001"}, {"noJJCWPrL221CNTRL","004-002"},
+            {"nSKeeNSVgt11CNTRL","005-001"}, {"nkbfkybTAP11CNTRL","005-002"}
+        };
+        var approved = DeviceAccessGuard.LoadPolicy().Devices;
+        foreach (var pair in expected)
+        {
+            Check(approved.Count(d => d.NodeId == pair.Key && d.Status == "approved") == 1);
+            Check(RegistrationOrigin.ForNode(pair.Key) == pair.Value);
+            Check(RegistrationOrigin.Url(pair.Value) == "https://sc-official-website.onrender.com/join/r/" + pair.Value);
+            using (var form = new CustomerQrForm(pair.Value)) Check(form != null);
+        }
+        Check(RegistrationOrigin.ForNode(null) == null);
+        Check(RegistrationOrigin.ForNode("unapproved") == null);
+        Check(RegistrationOrigin.ForNode("ndEzc41bWC21CNTRL") == null); // HQ is not a branch POS
+        Reject(() => RegistrationOrigin.Url(null));
+        Reject(() => new CustomerQrForm("999-001"));
+    }
+
     private static void RenderPreviews()
     {
         stage = "customer-sign-and-nonactivating-mouse-transparent-overlay";
         string output = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews"); Directory.CreateDirectory(output);
-        using (var form = new CustomerQrForm { ClientSize = new Size(800,600) })
+        using (var form = new CustomerQrForm("005-002") { ClientSize = new Size(800,600) })
         using (var image = new Bitmap(800,600))
         {
             form.DrawToBitmap(image,new Rectangle(0,0,800,600)); image.Save(Path.Combine(output,"customer-qr.png"));
@@ -368,7 +393,7 @@ internal static class DesktopFeatureCheck
                     using (var main = new QuietMember())
                     using (var create = new QuietRegistration())
                     using (var medical = new QuietMedical())
-                    using (var customer = new CustomerQrForm())
+                    using (var customer = new CustomerQrForm("005-002"))
                     using (context = new ApplicationContext())
                     {
                         mainForm = main; guard.Protect(main);

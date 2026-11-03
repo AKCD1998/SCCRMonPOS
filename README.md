@@ -2,6 +2,8 @@
 
 Administrator-requested branch updates: [SCProductDev fleet console](docs/FLEET_CONTROL.md).
 
+Registration QR source: [automatic branch/POS attribution](docs/TERMINAL_REGISTRATION_QR.md) (1.3.17).
+
 HQ000 background member/history bridge: [installation and live scope](sync-agent/live/WORK_STATUS.md).
 
 Receipt status: [saved receipt and stored member display](docs/RECEIPT_CLAIM_STATUS.md) (1.3.9).

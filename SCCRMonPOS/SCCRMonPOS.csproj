@@ -111,8 +111,8 @@
     <EmbeddedResource Include="Assets\DevicePolicy.json">
       <LogicalName>SCCRMonPOS.DevicePolicy.json</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Assets\RegistrationQr.png">
-      <LogicalName>SCCRMonPOS.RegistrationQr.png</LogicalName>
+    <EmbeddedResource Include="Assets\RegistrationQr\*.png">
+      <LogicalName>SCCRMonPOS.RegistrationQr.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\UpdatePublicKey.xml">
       <LogicalName>SCCRMonPOS.UpdatePublicKey.xml</LogicalName>
