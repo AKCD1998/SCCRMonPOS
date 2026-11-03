@@ -46,9 +46,10 @@ An expired legacy Ada card is not renewed as a side effect of linking.
 
 ## Installation, status and rollback
 
-1. Apply all three ordered `supabase/migrations` scripts for fast existing
-   links, the temporary publication fence, and registration provenance. The
-   final script safely restores the narrowly scoped publication grant.
+1. Apply the ordered `supabase/migrations` scripts for fast existing links,
+   the temporary publication fence, registration provenance and verified
+   legacy-device provenance. The provenance scripts safely restore the narrow
+   publication grant while retaining authenticated older POS devices.
    Apply only after the isolated-copy proof passes with the exact file digests.
    The private schemas and dedicated runtime role must already be owned.
 2. Back up the owned HQ package and manifest. Replace only the reviewed live
