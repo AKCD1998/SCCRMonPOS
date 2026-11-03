@@ -46,4 +46,11 @@ jobs:
           msbuild tools/ReceiptClaimStatusCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build-verify/receipt-claim-status-check/ReceiptClaimStatusCheck.exe
+      - name: Build and test administrator-requested fleet updates
+        run: |
+          msbuild tools/FleetUpdateCheck.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-verify/fleet-update-check/FleetUpdateCheck.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msbuild tools/FleetConsole.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           exit $LASTEXITCODE

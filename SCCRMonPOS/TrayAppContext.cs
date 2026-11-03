@@ -46,6 +46,12 @@ namespace SCCRMonPOS
         private ToolStripMenuItem _miUpdate;
         private Updates.UpdateForm _updateForm;
         private CashierWindowGuard _windowGuard;
+        private Updates.FleetUpdateService _fleetUpdates;
+        private Timer _fleetTimer;
+        private ToolStripMenuItem _miFleetStatus;
+        private readonly object _fleetGate = new object();
+        private int _backgroundOperations;
+        private bool _fleetShuttingDown;
 
         // ─────────────────────────────────────────────────────────────────────
 
@@ -74,6 +80,7 @@ namespace SCCRMonPOS
 
             InitTrayIcon();
             InitUpdates();
+            InitFleetUpdates();
 
             if (!_auth.HasToken || _api.IsTokenExpired())
             {
@@ -123,6 +130,8 @@ namespace SCCRMonPOS
             menu.Items.Add("โปรโมชั่นสะสมแต้มส่วนกลาง", null, (s, e) => CentralPromotions.OpenPortal());
             _miUpdate = new ToolStripMenuItem("ตรวจสอบรุ่นใหม่…", null, async (s, e) => await CheckUpdatesAsync(true));
             menu.Items.Add(_miUpdate);
+            _miFleetStatus = new ToolStripMenuItem("อัปเดตจากแอดมิน: รอเชื่อมต่อ") { Enabled = false };
+            menu.Items.Add(_miFleetStatus);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_miWatcherStatus);
             menu.Items.Add(new ToolStripSeparator());
@@ -199,8 +208,50 @@ namespace SCCRMonPOS
             return (_activeMemberClaimForm == null || _activeMemberClaimForm.IsDisposed) && !_customerDisplay.IsShowing;
         }
 
+        private void InitFleetUpdates()
+        {
+            _fleetUpdates = new Updates.FleetUpdateService(_api, _updates, Application.ExecutablePath, _dataFolder,
+                DeviceAccessGuard.CurrentDevice, () => _auth.HasToken, ReadyForFleetUpdate, TryFleetRestart, () => _auth.DeviceId);
+            _fleetUpdates.StatusChanged += status => { if (_miFleetStatus != null) _miFleetStatus.Text = "แอดมิน: " + status; };
+            _fleetTimer = new Timer { Interval = 5000 };
+            _fleetTimer.Tick += async (s, e) => { _fleetTimer.Interval = 15000; await _fleetUpdates.PollAsync(); };
+            _fleetTimer.Start();
+        }
+
+        private bool ReadyForFleetUpdate()
+        {
+            lock (_fleetGate)
+            {
+                if (_fleetShuttingDown || _backgroundOperations != 0 || ApiClient.ActiveRequests != 0 ||
+                    _customerDisplay.IsShowing || (_updateForm != null && !_updateForm.IsDisposed)) return false;
+                if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed && !_activeMemberClaimForm.ReadyForAdminUpdate) return false;
+                foreach (Form form in Application.OpenForms)
+                    if (!form.IsDisposed && form.Visible && !ReferenceEquals(form, _activeMemberClaimForm)) return false;
+                return true;
+            }
+        }
+
+        private bool TryFleetRestart(string staged, string envelope)
+        {
+            lock (_fleetGate)
+            {
+                if (!ReadyForFleetUpdate()) return false;
+                _fleetShuttingDown = true;
+                try
+                {
+                    // Only our verified helper and our ApplicationContext exit.
+                    // No process-name termination or AdaPos control is involved.
+                    _updates.StartHelper(staged, envelope);
+                    OnExit(this, EventArgs.Empty);
+                    return true;
+                }
+                catch { _fleetShuttingDown = false; throw; }
+            }
+        }
+
         private void OpenUpdateForm()
         {
+            if (_fleetUpdates?.HasPendingCommand == true) { MessageBox.Show(_fleetUpdates.Status, "SCCRM — คำสั่งแอดมิน"); return; }
             if (_updates.Available == null) return;
             if (_updateForm != null && !_updateForm.IsDisposed) { _updateForm.Activate(); return; }
             if (!CanRestartForUpdate())
@@ -216,6 +267,9 @@ namespace SCCRMonPOS
         // Called from the watcher background thread — cache only, no auto-popup.
         private void OnReceiptCompleted(object sender, PosReceipt receipt)
         {
+            lock (_fleetGate)
+            {
+            if (_fleetShuttingDown) return;
             if (_watcher == null || !_watcher.OwnsReceipt(receipt)) return;
             LogRuntime(
                 "Receipt detected: doc=" + (receipt?.DocNo ?? "-") +
@@ -226,10 +280,14 @@ namespace SCCRMonPOS
 
             lock (_receiptLock)
                 _standingByReceipt = receipt;
+            }
         }
 
         private void OnReturnDetected(object sender, PosReceipt receipt)
         {
+            lock (_fleetGate)
+            {
+            if (_fleetShuttingDown) return;
             if (_watcher == null || !_watcher.OwnsReceipt(receipt)) return;
             LogRuntime(
                 "Return detected: doc=" + (receipt?.DocNo ?? "-") +
@@ -239,7 +297,9 @@ namespace SCCRMonPOS
             AdvanceWatermark(receipt);
             lock (_receiptLock)
                 _standingByReceipt = null;
-            _ = Task.Run(async () => await ProcessRefundAsync(receipt));
+            _backgroundOperations++;
+            _ = Task.Run(async () => { try { await ProcessRefundAsync(receipt); } finally { lock (_fleetGate) _backgroundOperations--; } });
+            }
         }
 
         private async Task ProcessRefundAsync(PosReceipt receipt)
@@ -485,6 +545,8 @@ namespace SCCRMonPOS
         {
             if (disposing)
             {
+                _fleetTimer?.Dispose();
+                _fleetUpdates?.Dispose();
                 _watcher?.Dispose();
                 _hotKey?.Dispose();
                 _trayIcon?.Dispose();

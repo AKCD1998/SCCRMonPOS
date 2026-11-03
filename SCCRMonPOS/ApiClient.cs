@@ -1345,7 +1345,21 @@ namespace SCCRMonPOS
         /// up to MaxRetries times on connection-level failures only.
         /// Timeouts and HTTP 4xx/5xx are not retried.
         /// </summary>
+        private static int _activeRequests;
+        public static int ActiveRequests { get { return System.Threading.Volatile.Read(ref _activeRequests); } }
+        public Task<string> FleetRequestAsync(string operation, string body)
+        {
+            RequireValidToken();
+            if (operation != "poll" && operation != "report") throw new ArgumentException("Invalid fleet operation.");
+            return PostJsonAsync("/api/sccrm-fleet/device/" + operation, body, _staffToken);
+        }
         private static async Task<string> SendWithRetryAsync(Func<HttpRequestMessage> buildRequest)
+        {
+            System.Threading.Interlocked.Increment(ref _activeRequests);
+            try { return await SendWithRetryCoreAsync(buildRequest); }
+            finally { System.Threading.Interlocked.Decrement(ref _activeRequests); }
+        }
+        private static async Task<string> SendWithRetryCoreAsync(Func<HttpRequestMessage> buildRequest)
         {
             for (int attempt = 0; attempt < MaxRetries; attempt++)
             {
