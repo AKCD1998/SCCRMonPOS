@@ -8,6 +8,23 @@ function Rows([string]$sql){
 }
 function Run([string]$sql){$q=$db.CreateCommand();$q.CommandText=$sql;$q.CommandTimeout=15;try{return $q.ExecuteNonQuery()}finally{$q.Dispose()}}
 function Hash([object]$x){$h=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes(($x|ConvertTo-Json -Depth 12 -Compress))))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function Assert-LiveTarget([object]$Target,[object]$Credentials,[string]$Action){
+ $branch=[string]$Target.branch
+ if($branch -cnotmatch '^(000|001|003|004|005)$'){throw 'POINT_LIVE_TARGET_REFUSED'}
+ # Pin the same verified host, instance, machine and database. Named instances
+ # discover their current TCP port after SQL restart; historical explicit ports
+ # remain accepted for existing installations and rollback.
+ $expected=@{
+  '000'=@('tcp:100.90.166.72,49800','SERVER','100.90.166.72\SQLEXPRESS')
+  '001'=@('tcp:100.81.137.41,49754','SC_001','100.81.137.41\SQLEXPRESS')
+  '003'=@('tcp:100.77.101.94,49703','POSSRV','100.77.101.94\SQLEXPRESS')
+  '004'=@('tcp:100.113.59.42,49976','SERVER004','100.113.59.42\SQLEXPRESS')
+  '005'=@('tcp:100.106.107.80,49711','POSSRV','100.106.107.80\SQLEXPRESS')
+ }
+ $binding=$expected[$branch]
+ if($Target.server -cnotin @($binding[0],$binding[2]) -or $Target.machine -cne $binding[1] -or $Target.database -cne 'AdaAcc' -or $Target.identity -cne ($branch+'/'+$Target.machine+'/AdaAcc') -or $Action -cnotin @('apply','rights')){throw 'POINT_LIVE_TARGET_REFUSED'}
+ if($Credentials.user -cne ('sccrm_point_sync_'+$branch)){throw 'POINT_LIVE_WORKER_LOGIN_REQUIRED'}
+}
 try{
  $p=[Console]::In.ReadToEnd()|ConvertFrom-Json
  if($p.scope -cne 'SCCRM-ADA-POINT-NATIVE-V1' -or $p.target.branch -cnotmatch '^(000|001|003|004|005)$'){throw 'POINT_NATIVE_SCOPE_REFUSED'}
@@ -15,9 +32,7 @@ try{
  if($Mode -ceq 'Copy'){
   if($t.server -cne 'tcp:100.90.166.72,49800' -or $t.machine -cne 'SERVER' -or $t.database -cne ('SCCRM_PointCopy_20261102_'+$branch) -or $t.identity -cne ('copy'+$branch+'/SERVER/'+$t.database)){throw 'POINT_COPY_TARGET_REFUSED'}
  }else{
-  $expected=@{'000'=@('tcp:100.90.166.72,49800','SERVER');'001'=@('tcp:100.81.137.41,49754','SC_001');'003'=@('tcp:100.77.101.94,49703','POSSRV');'004'=@('tcp:100.113.59.42,49976','SERVER004');'005'=@('tcp:100.106.107.80,49711','POSSRV')}
-  if($t.server -cne $expected[$branch][0] -or $t.machine -cne $expected[$branch][1] -or $t.database -cne 'AdaAcc' -or $t.identity -cne ($branch+'/'+$t.machine+'/AdaAcc') -or $p.action -cnotin @('apply','rights')){throw 'POINT_LIVE_TARGET_REFUSED'}
-  if($p.credentials.user -cne ('sccrm_point_sync_'+$branch)){throw 'POINT_LIVE_WORKER_LOGIN_REQUIRED'}
+  Assert-LiveTarget $t $p.credentials ([string]$p.action)
  }
  $builder=New-Object Data.SqlClient.SqlConnectionStringBuilder;$builder['Data Source']=$t.server;$builder['Initial Catalog']=$t.database;$builder['User ID']=$p.credentials.user;$builder['Password']=$p.credentials.password;$builder['Connect Timeout']=5;$builder['Pooling']=$false;$builder['Application Name']='SCCRM-PointSync-'+$Mode
  $stage='connect';$db=New-Object Data.SqlClient.SqlConnection $builder.ConnectionString;$db.Open();$builder['Password']='';$p.credentials.password=''

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-11-03 — HQ point-sync named SQL instances
+
+- Accept each verified branch SQL named instance in the native point receiver
+  adapter, alongside its legacy pinned TCP endpoint. Keep exact host, machine,
+  database, restricted login/SID and allowed-action checks unchanged.
+- Add 55 offline target-boundary checks covering named/legacy endpoints and
+  rejected hosts, instances, ports, databases, identities, credentials and actions.
+- Document named-instance service configuration for SQL Express port changes.
+  Production rollout and readback remain separate operator checks.
+
 ### 2026-11-02 — 1.3.13 Branch 005 POS 002 approval
 
 - Approve the user-identified FRONT2 device by its verified stable Tailscale
