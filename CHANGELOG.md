@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-11-03 — 1.3.16 Fleet pilot target
+
+- Prepare a distinct signed version for verifying the first administrator-issued
+  update from the 1.3.15 bootstrap receiver. Keep its save barrier, device policy,
+  Ada connection and member/point contracts unchanged. Actual terminal restart
+  and running-hash acceptance remain separate recorded rollout checks.
+
 ### 2026-11-03 — 1.3.15 Administrator-requested branch updates
 
 - Add a SCProductDev console for explicit per-terminal update commands and a
