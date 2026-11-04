@@ -287,6 +287,13 @@ internal static class DesktopFeatureCheck
             {
                 Check(fixture.MainCanMinimize);
                 Check(fixture.MainTopMost);
+                stage = "floating-safety-button-is-not-unsaved-work";
+                Check(WaitFor(() => guard.ButtonHandle != IntPtr.Zero && IsWindowVisible(guard.ButtonHandle),2000));
+                var floating = Application.OpenForms.Cast<Form>().OfType<CashierWindowGuard.BackToSaleButton>().Single();
+                Check(floating.Visible && !TrayAppContext.BlocksFleetUpdate(floating,null));
+                var editing = Application.OpenForms.Cast<Form>().OfType<NewMemberForm>().Single();
+                Check(TrayAppContext.BlocksFleetUpdate(editing,null));
+                stage = "healthy-cashier-stays-on-top";
                 Check(fixture.Windows.Any(window => (GetWindowLong(window, -20) & 0x8) != 0));
                 Check(SetWindowPos(otherApp.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x13));
                 Check(IsAbove(fixture.Windows[1], otherApp.Handle));

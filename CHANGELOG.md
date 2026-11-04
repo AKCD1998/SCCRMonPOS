@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-11-04 — 1.3.19 Refresh pending administrator update status on demand
+
+- A click on the update menu now awaits a fresh (or already in-flight) fleet
+  check before displaying status. Replace the cached modal wait message with a
+  non-modal notification and identify the actual busy condition without PII.
+- Exclude only the independent return-to-sales safety button from work-window
+  detection. Retain unconfirmed receipts, edits, QR and API/refund save barriers.
+- Cover timer/menu overlap, fresh readiness after busy status, a real cross-STA
+  safety button in Application.OpenForms and preservation of a visible edit form.
+
 ### 2026-11-04 — 1.3.18 Compact purchase history and accessible window controls
 
 - Reduce the purchase-history window from 880 to 616 pixels wide (30%), retaining

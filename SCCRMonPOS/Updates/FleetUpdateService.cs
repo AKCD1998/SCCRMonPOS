@@ -64,21 +64,24 @@ namespace SCCRMonPOS.Updates
         private readonly ApprovedDevice device;
         private readonly Func<string> deviceId;
         private readonly Func<bool> authenticated, ready;
+        private readonly Func<string> busyReason;
         private readonly Func<string,string,bool> restart;
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
-        private bool polling,disposed;
+        private bool disposed;
+        private Task pollTask;
         public bool HasPendingCommand { get; private set; }
         public string Status { get; private set; } = "รอคำสั่งจากแอดมิน";
         public event Action<string> StatusChanged;
 
         public FleetUpdateService(ApiClient api,UpdateService updates,string executable,string dataFolder,
-            ApprovedDevice device,Func<bool> authenticated,Func<bool> ready,Func<string,string,bool> restart,Func<string> deviceId)
-            : this(api.FleetRequestAsync,updates,executable,dataFolder,device,authenticated,ready,restart,UpdateRelease.Verify,deviceId) { }
+            ApprovedDevice device,Func<bool> authenticated,Func<bool> ready,Func<string,string,bool> restart,Func<string> deviceId,Func<string> busyReason=null)
+            : this(api.FleetRequestAsync,updates,executable,dataFolder,device,authenticated,ready,restart,UpdateRelease.Verify,deviceId,busyReason) { }
         internal FleetUpdateService(Func<string,string,Task<string>> send,UpdateService updates,string executable,string dataFolder,
-            ApprovedDevice device,Func<bool> authenticated,Func<bool> ready,Func<string,string,bool> restart,Func<string,UpdateRelease> verify,Func<string> deviceId=null)
+            ApprovedDevice device,Func<bool> authenticated,Func<bool> ready,Func<string,string,bool> restart,Func<string,UpdateRelease> verify,Func<string> deviceId=null,Func<string> busyReason=null)
         {
             this.send=send;this.verify=verify;this.updates=updates;this.executable=Path.GetFullPath(executable);this.device=device;
             this.deviceId=deviceId;
+            this.busyReason=busyReason;
             this.authenticated=authenticated;this.ready=ready;this.restart=restart;
             stateFile=Path.Combine(dataFolder,"fleet-control","state.json");
             updateRoot=Path.Combine(Path.GetDirectoryName(this.executable),"data","updates")+Path.DirectorySeparatorChar;
@@ -110,10 +113,17 @@ namespace SCCRMonPOS.Updates
         }
         // Runs on the WinForms context. Only an explicit persisted admin job can
         // reach StageAsync; ordinary latest-version notifications do not install.
-        public async Task PollAsync()
+        public Task PollAsync()
         {
-            if(polling||disposed||device==null||!authenticated())return;
-            polling=true;
+            if(disposed)return Task.CompletedTask;
+            // A menu click joins an in-flight timer check instead of returning
+            // immediately with the previous check's cached status.
+            if(pollTask!=null&&!pollTask.IsCompleted)return pollTask;
+            if(device==null||!authenticated()) { Show("กรุณาเข้าสู่ระบบพนักงานก่อนรับคำสั่งอัปเดต");return Task.CompletedTask; }
+            return pollTask=PollCoreAsync();
+        }
+        private async Task PollCoreAsync()
+        {
             try
             {
                 string installed=UpdateRelease.HashFile(executable);
@@ -167,7 +177,7 @@ namespace SCCRMonPOS.Updates
                     state.Phase="waiting_for_idle";Save(state);
                 }
                 if(disposed)return;
-                if(!ready()) { await Report(command,"waiting_for_idle","WORK_IN_PROGRESS",installed);Show("รอ SCCRM บันทึกงาน / ปิดหน้าที่กำลังแก้ไขก่อนอัปเดต");return; }
+                if(!ready()) { string reason=busyReason?.Invoke();await Report(command,"waiting_for_idle","WORK_IN_PROGRESS",installed);Show(reason??"รอ SCCRM บันทึกงาน / ปิดหน้าที่กำลังแก้ไขก่อนอัปเดต");return; }
                 release.VerifyExecutable(state.StagedPath);
                 await Report(command,"installing","READY_TO_RESTART_SCCRM",installed);
                 if(disposed)return;
@@ -182,7 +192,6 @@ namespace SCCRMonPOS.Updates
             }
             catch(OperationCanceledException) { }
             catch { if(!disposed)Show("ติดต่อระบบอัปเดตไม่ได้ — SCCRM รุ่นเดิมยังใช้ต่อได้"); }
-            finally { polling=false; }
         }
         public void Dispose() { disposed=true;cancellation.Cancel(); }
     }

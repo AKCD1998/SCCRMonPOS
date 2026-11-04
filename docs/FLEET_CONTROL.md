@@ -27,6 +27,13 @@ changed by enrollment or update.
 
 ## Save barrier and execution
 
+Version 1.3.19 makes an update-menu click refresh fleet status immediately and
+await any check already in progress. Pending admin work uses a non-modal tray
+notification with the current busy reason instead of a cached MessageBox. The
+floating return-to-sales button is not pending work; actual edit/history windows,
+unconfirmed receipts, QR and saves still keep their existing barriers. Older
+installed versions retain their old menu behavior until their binary is updated.
+
 The tray app polls every 15 seconds. It may download a signed package while staff
 work, but waits for API requests, receipt confirmation, owned member-edit forms,
 customer QR display and background refund submissions to finish. A loaded,
