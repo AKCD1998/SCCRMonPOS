@@ -52,6 +52,7 @@ namespace SCCRMonPOS
         private readonly object _fleetGate = new object();
         private int _backgroundOperations;
         private bool _fleetShuttingDown;
+        private bool _openingUpdate;
 
         // ─────────────────────────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ namespace SCCRMonPOS
         private void InitFleetUpdates()
         {
             _fleetUpdates = new Updates.FleetUpdateService(_api, _updates, Application.ExecutablePath, _dataFolder,
-                DeviceAccessGuard.CurrentDevice, () => _auth.HasToken, ReadyForFleetUpdate, TryFleetRestart, () => _auth.DeviceId);
+                DeviceAccessGuard.CurrentDevice, () => _auth.HasToken, ReadyForFleetUpdate, TryFleetRestart, () => _auth.DeviceId, FleetUpdateBlocker);
             _fleetUpdates.StatusChanged += status => { if (_miFleetStatus != null) _miFleetStatus.Text = "แอดมิน: " + status; };
             _fleetTimer = new Timer { Interval = 5000 };
             _fleetTimer.Tick += async (s, e) => { _fleetTimer.Interval = 15000; await _fleetUpdates.PollAsync(); };
@@ -220,14 +221,29 @@ namespace SCCRMonPOS
 
         private bool ReadyForFleetUpdate()
         {
+            return FleetUpdateBlocker() == null;
+        }
+
+        internal static bool BlocksFleetUpdate(Form form, Form memberForm)
+        {
+            return !(form is CashierWindowGuard.BackToSaleButton) &&
+                !form.IsDisposed && form.Visible && !ReferenceEquals(form, memberForm);
+        }
+
+        private string FleetUpdateBlocker()
+        {
             lock (_fleetGate)
             {
-                if (_fleetShuttingDown || _backgroundOperations != 0 || ApiClient.ActiveRequests != 0 ||
-                    _customerDisplay.IsShowing || (_updateForm != null && !_updateForm.IsDisposed)) return false;
-                if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed && !_activeMemberClaimForm.ReadyForAdminUpdate) return false;
+                if (_fleetShuttingDown) return "กำลังปิดและเปิด SCCRM รุ่นใหม่";
+                if (_backgroundOperations != 0) return "รอ SCCRM บันทึกข้อมูลบิลคืนให้เสร็จ";
+                if (ApiClient.ActiveRequests != 0) return "รอ SCCRM ติดต่อเซิร์ฟเวอร์ให้เสร็จ แล้วจะอัปเดตต่อเอง";
+                if (_customerDisplay.IsShowing) return "กรุณาปิด QR บนจอลูกค้าก่อน แล้วจะอัปเดตต่อเอง";
+                if (_updateForm != null && !_updateForm.IsDisposed) return "มีหน้าต่างอัปเดตเปิดอยู่ กรุณาใช้งานหน้าต่างนั้นให้เสร็จก่อน";
+                if (_activeMemberClaimForm != null && !_activeMemberClaimForm.IsDisposed && !_activeMemberClaimForm.ReadyForAdminUpdate)
+                    return "รอหน้าสมาชิก: บันทึกบิลหรือข้อมูลที่ค้างให้เสร็จ แล้วปิดหน้าสมาชิกและหน้าต่างที่เปิดจากหน้านั้น";
                 foreach (Form form in Application.OpenForms)
-                    if (!form.IsDisposed && form.Visible && !ReferenceEquals(form, _activeMemberClaimForm)) return false;
-                return true;
+                    if (BlocksFleetUpdate(form, _activeMemberClaimForm)) return "ยังมีหน้าต่าง SCCRM เปิดอยู่ กรุณาปิดหลังบันทึกงาน แล้วจะอัปเดตต่อเอง";
+                return null;
             }
         }
 
@@ -249,9 +265,21 @@ namespace SCCRMonPOS
             }
         }
 
-        private void OpenUpdateForm()
+        private async void OpenUpdateForm()
         {
-            if (_fleetUpdates?.HasPendingCommand == true) { MessageBox.Show(_fleetUpdates.Status, "SCCRM — คำสั่งแอดมิน"); return; }
+            if (_openingUpdate || _fleetShuttingDown) return;
+            _openingUpdate = true;
+            try {
+            if (_fleetUpdates != null) {
+                await _fleetUpdates.PollAsync();
+                if (_fleetShuttingDown) return;
+                if (_fleetUpdates.HasPendingCommand) {
+                    // Non-modal: do not interrupt sales or turn the status view
+                    // itself into another window that prevents installation.
+                    _trayIcon.ShowBalloonTip(6000, "SCCRM — อัปเดตจากแอดมิน", _fleetUpdates.Status, ToolTipIcon.Info);
+                    return;
+                }
+            }
             if (_updates.Available == null) return;
             if (_updateForm != null && !_updateForm.IsDisposed) { _updateForm.Activate(); return; }
             if (!CanRestartForUpdate())
@@ -262,6 +290,8 @@ namespace SCCRMonPOS
             _updateForm = new Updates.UpdateForm(_updates, CanRestartForUpdate, () => OnExit(this, EventArgs.Empty));
             _updateForm.FormClosed += (s, e) => _updateForm = null;
             _updateForm.Show();
+            } catch { if (!_fleetShuttingDown) _trayIcon.ShowBalloonTip(5000, "SCCRM", "ตรวจสถานะอัปเดตไม่ได้ กรุณาลองใหม่", ToolTipIcon.Warning); }
+            finally { _openingUpdate = false; }
         }
 
         // Called from the watcher background thread — cache only, no auto-popup.

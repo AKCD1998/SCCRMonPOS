@@ -29,6 +29,8 @@ internal static class FleetUpdateCheck
         public readonly Download Download;
         public readonly UpdateService Updates;
         public bool Ready,FailPoll,WorkDuringInstall,LostInstallAck;
+        public TaskCompletionSource<bool> PollGate;
+        public int Polls;
         public int Restarts,Applies;
         public readonly List<FleetReport> Reports=new List<FleetReport>();
         private readonly string marker;
@@ -48,13 +50,13 @@ internal static class FleetUpdateCheck
             Command=new FleetCommand {Id=Guid.NewGuid().ToString("D"),NodeId="fixture-node",Version="1.3.16",Sha256=hash,Envelope=Envelope,State="pending"};
             Download=new Download {Bytes=bytes};Updates=new UpdateService(Target,UpdateService.DefaultManifestUrl,new HttpClient(Download),e=>UpdateRelease.Verify(e,PublicKey));
         }
-        public FleetUpdateService Service()
+        public FleetUpdateService Service(Func<string> busyReason=null)
         {
-            return new FleetUpdateService(Send,Updates,Target,Path.Combine(Root,"data"),new ApprovedDevice {NodeId="fixture-node",Hostname="FIXTURE"},()=>true,()=>Ready,Restart,e=>UpdateRelease.Verify(e,PublicKey));
+            return new FleetUpdateService(Send,Updates,Target,Path.Combine(Root,"data"),new ApprovedDevice {NodeId="fixture-node",Hostname="FIXTURE"},()=>true,()=>Ready,Restart,e=>UpdateRelease.Verify(e,PublicKey),busyReason:busyReason);
         }
         private Task<string> Send(string operation,string body)
         {
-            if(operation=="poll") {if(FailPoll)throw new IOException("isolated simulated offline");return Task.FromResult(FleetJson.Write(new FleetReply {Ok=true,Enabled=true,Command=Command}));}
+            if(operation=="poll") {Polls++;if(FailPoll)throw new IOException("isolated simulated offline");return PollReply();}
             var report=FleetJson.Read<FleetReport>(body);Reports.Add(report);
             if(report.State=="installing")
             {
@@ -62,6 +64,11 @@ internal static class FleetUpdateCheck
                 if(LostInstallAck){LostInstallAck=false;throw new IOException("isolated lost acknowledgement");}
             }
             return Task.FromResult("{\"ok\":true}");
+        }
+        private async Task<string> PollReply()
+        {
+            if(PollGate!=null)await PollGate.Task;
+            return FleetJson.Write(new FleetReply {Ok=true,Enabled=true,Command=Command});
         }
         private bool Restart(string staged,string envelope)
         {
@@ -114,6 +121,19 @@ internal static class FleetUpdateCheck
         using(var f=new Fixture())using(var service=f.Service())
         {
             f.Command.NodeId="another-device";f.Ready=true;await service.PollAsync();Check(f.Restarts==0&&f.Download.Calls==0);
+        }
+        using(var f=new Fixture())using(var service=f.Service(()=>"รอปิด QR จอลูกค้า"))
+        {
+            f.Ready=false;await service.PollAsync();
+            Check(service.Status=="รอปิด QR จอลูกค้า"&&f.Applies==0);
+            f.PollGate=new TaskCompletionSource<bool>();
+            var timer=service.PollAsync();var menu=service.PollAsync();
+            Check(ReferenceEquals(timer,menu)&&!menu.IsCompleted);
+            int before=f.Polls;f.Ready=true;f.PollGate.SetResult(true);
+            await Task.WhenAll(timer,menu);
+            Check(f.Polls==before&&f.Applies==1&&f.Restarts==1);
+            await service.PollAsync();
+            Check(!service.HasPendingCommand&&service.Status.Contains("อัปเดตสำเร็จ"));
         }
     }
     private static int Main()
