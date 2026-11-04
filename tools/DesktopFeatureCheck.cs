@@ -54,6 +54,7 @@ internal static class DesktopFeatureCheck
                 RenderPreviews();
                 RegistrationOrigins();
                 MemberSelection();
+                PurchaseHistoryLayout();
                 CashierWindowSwitching();
             }
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + ",\"stage\":\"" + stage + "\"}"); return 0;
@@ -331,6 +332,59 @@ internal static class DesktopFeatureCheck
             button.DrawToBitmap(bitmap, new Rectangle(0,0,196,36));
             bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews","back-to-sale.png"));
             Check((GetWindowLong(button.Handle, -20) & 0x08000000) != 0);
+        }
+    }
+
+    private static void PurchaseHistoryLayout()
+    {
+        stage = "compact-history-keeps-search-and-window-controls";
+        var preview = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews");
+        using (var history = new PurchaseHistoryForm(new ApiClient("http://127.0.0.1:1")))
+        {
+            Check(history.Width == 616 && history.MinimumSize.Width < history.Width);
+            Check(history.MaximizeBox && history.FormBorderStyle == FormBorderStyle.Sizable);
+            history.StartPosition = FormStartPosition.Manual;
+            history.Location = new Point(-12000,-12000);
+            history.ShowInTaskbar = false;
+            history.Show(); // Real child visibility/layout, entirely offscreen and with no API request.
+            var fields = typeof(PurchaseHistoryForm);
+            var search = (TextBox)fields.GetField("_txtSearch",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(history);
+            var choices = (ComboBox)fields.GetField("_cboResults",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(history);
+            var grid = (DataGridView)fields.GetField("_dgvPurchases",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(history);
+            var member = (Label)fields.GetField("_lblMember",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(history);
+            member.Text = "สมาชิก: สมาชิกตัวอย่าง";
+            grid.Rows.Add("2026-11-04 10:30", "S2611005001-0004300", "005", "175.00", "0", "-");
+            foreach (int width in new[] {616,560,1024})
+            {
+                history.Size = new Size(width,680);
+                history.PerformLayout();
+                using (var bitmap = new Bitmap(history.Width,history.Height))
+                {
+                    history.DrawToBitmap(bitmap,new Rectangle(Point.Empty,history.Size));
+                    bitmap.Save(Path.Combine(preview,"purchase-history-"+width+".png"));
+                }
+                Check(search.Width >= 180 && choices.Width >= 100);
+                Check(choices.Right <= choices.Parent.ClientSize.Width && choices.Left > search.Right);
+                Check(grid.Width == history.ClientSize.Width && grid.Columns.Count == 6);
+            }
+            history.Close();
+        }
+        stage = "return-to-sales-clears-normal-and-maximized-captions";
+        foreach (var area in new[] { new Rectangle(0,0,1024,728), new Rectangle(-1280,80,1280,944) })
+        {
+            // A 30%-narrower centered history pane leaves the usual button clear.
+            var compact = new Rectangle(area.Left+(area.Width-616)/2,area.Top+60,616,680);
+            Check(CashierWindowGuard.BackToSaleBounds(area,compact).Top == area.Top+8);
+            foreach (var active in new[] {
+                new Rectangle(area.Left-8,area.Top-8,area.Width+16,area.Height+16),
+                new Rectangle(area.Right-700,area.Top,700,680),
+            })
+            {
+                var button = CashierWindowGuard.BackToSaleBounds(area,active);
+                Check(button.Top >= active.Top+48);
+                Check(area.Contains(button));
+                Check(button.Width == 196 && button.Height == 36);
+            }
         }
     }
 

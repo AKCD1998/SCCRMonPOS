@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-11-04 — 1.3.18 Compact purchase history and accessible window controls
+
+- Reduce the purchase-history window from 880 to 616 pixels wide (30%), retaining
+  native maximize and all history/item columns through existing scrolling.
+- Keep the independent return-to-sales button clear of the active owned dialog's
+  title bar, including when maximized. Preserve manual parking, hung-UI recovery
+  and unsaved work. No member, receipt, SQL or points behavior changes.
+
 ### 2026-11-03 — Recover branch member delivery after SQL transport failures
 
 - Preserve the outer SQL provider error when an inner Win32 error exists, so

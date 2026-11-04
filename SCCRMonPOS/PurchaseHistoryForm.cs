@@ -67,8 +67,8 @@ namespace SCCRMonPOS
         {
             Text          = "ประวัติการซื้อ";
             StartPosition = FormStartPosition.CenterParent;
-            MinimumSize   = new Size(720, 620);
-            Size          = new Size(880, 680);
+            MinimumSize   = new Size(560, 620);
+            Size          = new Size(616, 680); // 30% narrower; native maximize remains available.
             Font          = new Font("Segoe UI", 9f);
 
             var lblTitle = new Label
