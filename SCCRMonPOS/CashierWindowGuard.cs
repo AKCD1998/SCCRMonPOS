@@ -129,9 +129,28 @@ namespace SCCRMonPOS
             // button at the top-right of the monitor containing the member pane.
             var area = bounds.IntersectsWith(SystemInformation.VirtualScreen)
                 ? Screen.FromRectangle(bounds).WorkingArea : bounds;
-            button.Bounds = new Rectangle(area.Right - 204, area.Top + 8, 196, 36);
+            // A history/registration dialog can be the active owned window.
+            // Native queries keep the safety thread independent of its UI queue.
+            var active = GetLastActivePopup(_target);
+            NativeRect activeRect;
+            var activeBounds = active != IntPtr.Zero && IsOurWindow(active, selected.ThreadId) &&
+                IsWindowVisible(active) && !IsIconic(active) && GetWindowRect(active, out activeRect)
+                ? Rectangle.FromLTRB(activeRect.Left, activeRect.Top, activeRect.Right, activeRect.Bottom) : bounds;
+            button.Bounds = BackToSaleBounds(area, activeBounds);
             if (!button.Visible) button.Show();
             SetWindowPos(button.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x13); // TOPMOST without activation
+        }
+
+        internal static Rectangle BackToSaleBounds(Rectangle area, Rectangle activeWindow)
+        {
+            var position = new Rectangle(area.Right - 204, area.Top + 8, 196, 36);
+            // Reserve the whole title bar, including Windows' minimize/maximize/
+            // close controls. A maximized pane must still be restorable/closable.
+            int titleHeight = Math.Max(48, SystemInformation.CaptionHeight + SystemInformation.FrameBorderSize.Height * 2);
+            var titleBar = new Rectangle(activeWindow.Left, activeWindow.Top, activeWindow.Width, titleHeight);
+            if (position.IntersectsWith(titleBar))
+                position.Y = Math.Min(area.Bottom - position.Height - 8, Math.Max(area.Top + 8, titleBar.Bottom + 8));
+            return position;
         }
 
         private bool IsOurWindow(IntPtr window, uint threadId)
@@ -218,6 +237,7 @@ namespace SCCRMonPOS
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out NativeRect rectangle);
         [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+        [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr window);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
