@@ -297,6 +297,14 @@ internal static class DesktopFeatureCheck
                     var payload=form.BuildRequest();
                     Check(payload.Name=="Personal fixture edited" && payload.Phone=="0990000002" && payload.Sex=="male" && payload.Dob=="1992-02-29");
                     Check(ReferenceEquals(payload.PharmacyMedRecord,medical));
+                    using(var openDraft=new PharmacyMedRecordForm("synthetic",medical))
+                    {
+                        typeof(NewMemberForm).GetField("_medRecordForm",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,openDraft);
+                        ((Task)typeof(NewMemberForm).GetMethod("SaveAsync",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null)).GetAwaiter().GetResult();
+                        Check(EditField<Button>(form,"_btnSave").Enabled && !form.IsDisposed);
+                        Check(EditField<Label>(form,"_lblStatus").Text.Contains("เวชระเบียน"));
+                        Check(form.BuildRequest().Name==payload.Name && ReferenceEquals(form.BuildRequest().PharmacyMedRecord,medical));
+                    }
                     EditField<CheckBox>(form,"_chkDobUnknown").Checked=true;
                     Check(form.BuildRequest().Dob==null && !EditField<DateTimePicker>(form,"_dtpDob").Enabled);
                 }
@@ -309,6 +317,11 @@ internal static class DesktopFeatureCheck
                 EditField<TextBox>(form,"_txtWeight").Text="61.25";
                 EditField<TextBox>(form,"_txtDrugAllergies").Text="Synthetic changed";
                 EditField<CheckBox>(form,"_chkDiabetes").Checked=true;
+                using(var bitmap=new Bitmap(form.Width,form.Height))
+                {
+                    form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,form.Size));
+                    bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews","medical-draft.png"));
+                }
                 typeof(PharmacyMedRecordForm).GetMethod("OnSaveClick",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{null,EventArgs.Empty});
                 Check(saved!=null && saved.MemberId=="synthetic" && saved.WeightKg=="61.25" && saved.DrugAllergies=="Synthetic changed" && saved.HasDiabetes);
             }
