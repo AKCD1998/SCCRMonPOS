@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -131,7 +132,9 @@ namespace SCCRMonPOS
                 _rdUnspecified.Checked = true;
 
             DateTime dob;
-            if (!string.IsNullOrWhiteSpace(m.Dob) && DateTime.TryParse(m.Dob, out dob))
+            if (!string.IsNullOrWhiteSpace(m.Dob) &&
+                DateTime.TryParseExact(m.Dob, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dob) &&
+                dob >= _dtpDob.MinDate && dob <= _dtpDob.MaxDate)
             {
                 _chkDobUnknown.Checked = false;
                 _dtpDob.Value          = dob;
@@ -146,23 +149,17 @@ namespace SCCRMonPOS
 
             if (string.IsNullOrWhiteSpace(name))  { SetStatus("กรุณาใส่ชื่อ-นามสกุล", true);  return; }
             if (string.IsNullOrWhiteSpace(phone)) { SetStatus("กรุณาใส่เบอร์โทรศัพท์", true); return; }
+            if (_medRecordForm != null && !_medRecordForm.IsDisposed)
+            {
+                SetStatus("กรุณากดใช้ข้อมูลนี้หรือยกเลิกในหน้าเวชระเบียนก่อน", true);
+                _medRecordForm.Activate();
+                return;
+            }
 
             SetStatus(IsEditMode ? "กำลังบันทึกการแก้ไข…" : "กำลังบันทึก…", false, Color.DimGray);
             _btnSave.Enabled = false;
 
-            string sex = _rdMale.Checked ? "male" : (_rdFemale.Checked ? "female" : "");
-            string dob = _chkDobUnknown.Checked ? null : _dtpDob.Value.ToString("yyyy-MM-dd");
-
-            var request = new CreateMemberRequest
-            {
-                Name = name,
-                Phone = phone,
-                Email = _txtEmail.Text.Trim(),
-                Sex = sex,
-                Dob = dob,
-                Remark = _txtRemark.Text.Trim(),
-                PharmacyMedRecord = _medRecord
-            };
+            var request = BuildRequest();
 
             MemberSearchResult result = null;
             string errorMsg = null;
@@ -197,8 +194,8 @@ namespace SCCRMonPOS
                     PointsSource = result.PointsSource, PointsStatus=result.PointsStatus,
                     PointsObservedAt=result.PointsObservedAt, BalanceExact=result.BalanceExact,
                     PharmacyMedRecordAvailable = result.PharmacyMedRecordAvailable,
-                    Sex = sex,
-                    Dob = dob,
+                    Sex = request.Sex,
+                    Dob = request.Dob,
                     Remark = _txtRemark.Text.Trim(),
                     ThaiId = _existing.ThaiId,
                     PharmacyMedRecord = _medRecord
@@ -212,6 +209,18 @@ namespace SCCRMonPOS
             MemberSaved?.Invoke(result);
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        internal CreateMemberRequest BuildRequest()
+        {
+            return new CreateMemberRequest
+            {
+                Name = _txtName.Text.Trim(), Phone = _txtPhone.Text.Trim(), Email = _txtEmail.Text.Trim(),
+                Sex = _rdMale.Checked ? "male" : (_rdFemale.Checked ? "female" : ""),
+                // The API date is Gregorian ISO regardless of the Windows display calendar.
+                Dob = _chkDobUnknown.Checked ? null : _dtpDob.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                Remark = _txtRemark.Text.Trim(), PharmacyMedRecord = _medRecord
+            };
         }
 
         private void SetStatus(string text, bool isError, Color? color = null)

@@ -54,6 +54,7 @@ internal static class DesktopFeatureCheck
                 RenderPreviews();
                 RegistrationOrigins();
                 MemberSelection();
+                MemberEditing();
                 PurchaseHistoryLayout();
                 CashierWindowSwitching();
             }
@@ -265,6 +266,54 @@ internal static class DesktopFeatureCheck
             Check(selected != null && !selected.PointsAvailable);
             Check(!(bool)typeof(MemberClaimForm).GetMethod("CanConfirm",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null));
         }
+    }
+
+    private static T EditField<T>(object form, string name)
+    {
+        return (T)form.GetType().GetField(name, BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
+    }
+
+    private static void MemberEditing()
+    {
+        var priorCulture = Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            foreach (var culture in new[] { "th-TH", "en-US" })
+            {
+                stage = "member-dob-roundtrip-" + culture;
+                Thread.CurrentThread.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+                var medical = new SCCRMonPOS.Models.PharmacyMedRecord { WeightKg="61.25", DrugAllergies="Synthetic allergy" };
+                var detail = new MemberDetail { Id="synthetic", DisplayName="Personal fixture", Phone="0990000001",
+                    Dob="1990-04-12", Sex="female", PharmacyMedRecordAvailable=true, PharmacyMedRecord=medical };
+                using (var form = new NewMemberForm(new ApiClient("http://127.0.0.1:1"), detail))
+                {
+                    Check(EditField<DateTimePicker>(form,"_dtpDob").Value == new DateTime(1990,4,12));
+                    Check(!EditField<CheckBox>(form,"_chkDobUnknown").Checked);
+                    Check(form.BuildRequest().Dob == "1990-04-12");
+                    EditField<TextBox>(form,"_txtName").Text="Personal fixture edited";
+                    EditField<TextBox>(form,"_txtPhone").Text="0990000002";
+                    EditField<RadioButton>(form,"_rdMale").Checked=true;
+                    EditField<DateTimePicker>(form,"_dtpDob").Value=new DateTime(1992,2,29);
+                    var payload=form.BuildRequest();
+                    Check(payload.Name=="Personal fixture edited" && payload.Phone=="0990000002" && payload.Sex=="male" && payload.Dob=="1992-02-29");
+                    Check(ReferenceEquals(payload.PharmacyMedRecord,medical));
+                    EditField<CheckBox>(form,"_chkDobUnknown").Checked=true;
+                    Check(form.BuildRequest().Dob==null && !EditField<DateTimePicker>(form,"_dtpDob").Enabled);
+                }
+            }
+            stage="medical-edits-return-to-member-draft";
+            using(var form=new PharmacyMedRecordForm("synthetic",new SCCRMonPOS.Models.PharmacyMedRecord { WeightKg="55", DrugAllergies="Synthetic old" }))
+            {
+                SCCRMonPOS.Models.PharmacyMedRecord saved=null;
+                form.RecordSaved+=record=>saved=record;
+                EditField<TextBox>(form,"_txtWeight").Text="61.25";
+                EditField<TextBox>(form,"_txtDrugAllergies").Text="Synthetic changed";
+                EditField<CheckBox>(form,"_chkDiabetes").Checked=true;
+                typeof(PharmacyMedRecordForm).GetMethod("OnSaveClick",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{null,EventArgs.Empty});
+                Check(saved!=null && saved.MemberId=="synthetic" && saved.WeightKg=="61.25" && saved.DrugAllergies=="Synthetic changed" && saved.HasDiabetes);
+            }
+        }
+        finally { Thread.CurrentThread.CurrentCulture=priorCulture; }
     }
 
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);

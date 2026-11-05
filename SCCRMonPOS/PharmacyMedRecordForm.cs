@@ -118,7 +118,8 @@ namespace SCCRMonPOS
             {
                 AutoSize  = false,
                 TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = Color.FromArgb(160, 0, 0),
+                ForeColor = Color.FromArgb(120, 120, 120),
+                Text = "บันทึกพร้อมหน้าสมาชิก",
                 Bounds    = new Rectangle(12, 12, 200, 28),
                 Font      = new Font("Tahoma", 8.5f)
             };
@@ -135,7 +136,7 @@ namespace SCCRMonPOS
 
             _btnSave = new Button
             {
-                Text      = "บันทึก",
+                Text      = "ใช้ข้อมูลนี้",
                 Bounds    = new Rectangle(330, 10, 100, 30),
                 BackColor = Color.FromArgb(16, 74, 132),
                 ForeColor = Color.White,
