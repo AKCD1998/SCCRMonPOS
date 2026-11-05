@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-11-05 — 1.3.20 Member date editing and medical drafts
+
+- Read/write API birth dates as Gregorian ISO dates regardless of the Windows
+  calendar. Thai Windows previously sent Buddhist years and misread API years.
+- Clarify that the medical popup returns a draft to the member form. Keep an
+  open medical draft from being discarded by the parent Save button.
+- Verify real forms under Thai and English cultures and changed medical fields.
+  Shared Ada contact phone edits and medical storage require the matching API
+  deployment; no member merge, Ada write, point or purchase change is included.
+
 ### 2026-11-04 — 1.3.19 Refresh pending administrator update status on demand
 
 - A click on the update menu now awaits a fresh (or already in-flight) fleet

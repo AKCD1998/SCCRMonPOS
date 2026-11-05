@@ -1,5 +1,20 @@
 # Basic membership release — 2026-10-21
 
+## Member editing follow-up — 1.3.20
+
+Birth dates are parsed and serialized as Gregorian `yyyy-MM-dd` under both
+Thai and English Windows settings. Display remains in the cashier's local
+calendar. The medical popup's **ใช้ข้อมูลนี้** returns its draft; **บันทึกการแก้ไข**
+on the member form commits demographics and that draft together. A still-open
+medical popup blocks the parent save to avoid discarding un-applied edits.
+
+The matching website API preserves an unchanged shared Ada contact phone instead
+of trying to reserve it as a unique account phone. Personal and company records
+remain separate, and changing to another account's number still fails atomically.
+The optional medical table must be explicitly provisioned with RLS and no browser
+role access. Publishing 1.3.20 does not install it on POS devices; the operator
+still issues fleet commands from SCProductDev.
+
 This release makes registration, search and profile editing use the existing
 Supabase CRM identities, including customers who registered through the public
 QR form. It keeps the existing API URL and staff-device login/PIN. The backend
