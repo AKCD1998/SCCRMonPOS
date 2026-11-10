@@ -58,7 +58,7 @@ function validateAssignment(raw, options = {}) {
   requireValue(raw.hqIdentity === options.expectedHqIdentity, 'HQ_AUTHORITY_IDENTITY_MISMATCH');
   requireValue(typeof raw.profileHash === 'string' && HASH.test(raw.profileHash), 'ASSIGNMENT_PROFILE_HASH_REFUSED');
   requireValue(isAdaArCode(raw.adaCode), 'ASSIGNMENT_AR_CODE_REFUSED');
-  if (raw.kind === 'hq_create') {
+  if (raw.kind === 'hq_create' || raw.kind === 'hq_create_distinct') {
     requireValue(HQ_AR.test(raw.adaCode), 'HQ_CREATED_CODE_PREFIX_REFUSED');
   } else {
     requireValue(raw.kind === 'approved_existing' && options.allowApprovedExisting === true,

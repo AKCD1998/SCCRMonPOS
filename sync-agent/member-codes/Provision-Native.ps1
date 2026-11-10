@@ -129,6 +129,7 @@ try{
   if($Mode -ceq 'Copy'){Run 'CREATE TABLE dbo.TCNTSccrmCodeRefFixture(fixture_id int NOT NULL CONSTRAINT PK_TCNTSccrmCodeRefFixture PRIMARY KEY,FTCstCode varchar(20) NOT NULL);CREATE INDEX IND_TCNTSccrmCodeRefFixture_FTCstCode ON dbo.TCNTSccrmCodeRefFixture(FTCstCode)'}
   Run 'INSERT dbo.SCCRM_MemberCodeScope(singleton,marker,scope,hq_identity,target_identity,database_name,machine_name,branch_code,role,native_format,reference_count,reference_schema_hash,created_at) VALUES(1,@marker,@scope,@hq,@identity,@database,@machine,@branch,@role,''AR000-######'',@references,@hash,GETUTCDATE())' @{marker=[guid]$marker;scope=$scope;hq=$hqIdentity;identity=$identity;database=$database;machine=$machine;branch=$branch;role=$role;references=$references.Count;hash=$referenceHash}
  }
+ if($existingScope){Run ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'RegistrationSchemaUpgrade.sql')))}
  $copyGuard=if($Mode -ceq 'Copy'){"IF (SELECT COUNT(*) FROM dbo.SCCRM_FanoutCopyMeta)<>1 OR NOT EXISTS(SELECT 1 FROM dbo.SCCRM_FanoutCopyMeta WHERE marker='fa35c153-6692-43b8-afd1-b102a119b002' AND scope='SCCRM-FANOUT-COPY-LAB-20261029' AND branch_code='$branch') BEGIN RAISERROR('MEMBER_CODES_COPY_MARKER_REQUIRED',16,1);RETURN;END;"}else{''}
  $projection=(@($columns|ForEach-Object{'c.'+(Ident ([string]$_.name))}) -join ',')
  $sql=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Common.sql'))+"`nGO`n"+[IO.File]::ReadAllText((Join-Path $PSScriptRoot $(if($role -ceq 'hq'){'Hq.sql'}else{'Target.sql'})))

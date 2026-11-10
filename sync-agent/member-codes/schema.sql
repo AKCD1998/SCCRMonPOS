@@ -36,12 +36,12 @@ CREATE TABLE IF NOT EXISTS sccrm_member_codes.assignments(
   AND jsonb_typeof(profile->'phone')='string' AND (profile->>'phone') ~ '^0[0-9]{9}$'
   AND jsonb_typeof(profile->'email')='string' AND length(profile->>'email')<=100),
  assigned_at timestamptz NOT NULL, version integer NOT NULL CHECK(version=1),
- kind text NOT NULL CHECK(kind IN('hq_create','approved_existing')),
+ kind text NOT NULL CHECK(kind IN('hq_create','hq_create_distinct','approved_existing')),
  deliver_to_branches boolean NOT NULL DEFAULT true,
  assignment_hash char(64) NOT NULL CHECK(assignment_hash ~ '^[a-f0-9]{64}$'),
  authority_reference text NOT NULL CHECK(length(authority_reference) BETWEEN 1 AND 500),
  recorded_at timestamptz NOT NULL DEFAULT now(),
- CHECK(kind<>'hq_create' OR ada_code ~ '^AR000-[0-9]{6}$'),
+ CHECK(kind NOT IN('hq_create','hq_create_distinct') OR ada_code ~ '^AR000-[0-9]{6}$'),
  UNIQUE(assignment_id,member_id,ada_code), UNIQUE(assignment_id,member_id),
  UNIQUE(assignment_id,member_id,ada_code,profile_hash,assignment_hash),
  UNIQUE(assignment_id,member_id,ada_code,profile_hash,assignment_hash,deliver_to_branches)

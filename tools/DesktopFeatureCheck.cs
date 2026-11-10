@@ -54,6 +54,8 @@ internal static class DesktopFeatureCheck
                 RenderPreviews();
                 RegistrationOrigins();
                 MemberSelection();
+                RegistrationPhones();
+                RegistrationChoices();
                 MemberEditing();
                 PurchaseHistoryLayout();
                 CashierWindowSwitching();
@@ -271,6 +273,87 @@ internal static class DesktopFeatureCheck
     private static T EditField<T>(object form, string name)
     {
         return (T)form.GetType().GetField(name, BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
+    }
+
+    private static void RegistrationChoices()
+    {
+        stage = "plain-language-registration-choice-without-default-confirmation";
+        var candidates = new[] {
+            new RegistrationCandidate { Id="member:synthetic-1", Name="ตัวอย่าง สมาชิกเดิม", Phone="0990000001", MemberCode="AR003-000001", CanUseExisting=true },
+            new RegistrationCandidate { Id="ada:synthetic-2", Name="ตัวอย่าง อีกคนที่ใช้เบอร์เดียวกัน", Phone="0990000001", MemberCode="AR005-000002", CanUseExisting=true },
+            new RegistrationCandidate { Id="member:closed", Name="ตัวอย่าง ปิดใช้งาน", Phone="0990000001", MemberCode="AR001-000003", CanUseExisting=false }
+        };
+        Func<RegistrationMatchForm,string,Button> button = (form,text) => form.Controls.OfType<FlowLayoutPanel>().Single().Controls.OfType<Button>().Single(b=>b.Text==text);
+        using(var form=new RegistrationMatchForm(candidates))
+        {
+            form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-12000,-12000);form.Show();
+            var grid=EditField<DataGridView>(form,"_names");
+            var handle=form.Handle;
+            form.PerformLayout();
+            stage="registration-choice-no-default";
+            Check(form.AcceptButton==null && form.CancelButton!=null && grid.Rows.Count==3);
+            stage="registration-choice-button-layout";
+            foreach(var b in form.Controls.OfType<FlowLayoutPanel>().Single().Controls.OfType<Button>())
+                Check(b.Right<=b.Parent.ClientSize.Width && b.Bottom<=b.Parent.ClientSize.Height);
+            string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"previews"); Directory.CreateDirectory(output);
+            using(var image=new Bitmap(form.Width,form.Height))
+            { form.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(Path.Combine(output,"registration-choice.png")); }
+            grid.CurrentCell=grid.Rows[2].Cells[0];
+            stage="registration-choice-inactive-selection";
+            Check(!button(form,"ใช่ ใช้ชื่อเดิม").Enabled);
+            grid.CurrentCell=grid.Rows[1].Cells[0];
+            stage="registration-choice-active-selection";
+            Check(button(form,"ใช่ ใช้ชื่อเดิม").Enabled);
+            button(form,"ใช่ ใช้ชื่อเดิม").PerformClick();
+            stage="registration-choice-existing-click";
+            Check(form.DialogResult==DialogResult.OK && form.UseExisting && form.SelectedCandidateId==candidates[1].Id);
+        }
+        using(var form=new RegistrationMatchForm(candidates))
+        {
+            form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-12000,-12000);form.Show();
+            var handle=form.Handle;
+            button(form,"คนละคน สมัครใหม่").PerformClick();
+            Check(form.DialogResult==DialogResult.OK && !form.UseExisting && form.SelectedCandidateId==null);
+        }
+        using(var form=new RegistrationMatchForm(candidates))
+        {
+            form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-12000,-12000);form.Show();
+            var handle=form.Handle;
+            button(form,"กลับไปแก้ข้อมูล").PerformClick();
+            Check(form.DialogResult==DialogResult.Cancel && !form.UseExisting && form.SelectedCandidateId==null);
+        }
+    }
+
+    private static void RegistrationPhones()
+    {
+        stage = "registration-mobile-input-gate";
+        using (var form = new NewMemberForm((ApiClient)null))
+        {
+            var name = EditField<TextBox>(form, "_txtName");
+            var phone = EditField<TextBox>(form, "_txtPhone");
+            var save = EditField<Button>(form, "_btnSave");
+            name.Text = "Synthetic registration";
+            Check(!save.Enabled);
+            foreach (string invalid in new[] { "081234567", "08123456789", "021234567", "0712345678", "0111111111", "081letters2345678", "+19990000001" })
+            {
+                phone.Text = invalid;
+                Check(!save.Enabled);
+                // A direct submit also rejects before accessing the null API.
+                ((Task)typeof(NewMemberForm).GetMethod("SaveAsync", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null)).GetAwaiter().GetResult();
+                Check(EditField<Label>(form, "_lblStatus").Text.Contains("10 หลัก"));
+            }
+            foreach (string valid in new[] { "0612345678", "0812345678", "099 000 0001", "+66 99 000 0001", "0066990000001", "๐๙๙๐๐๐๐๐๐๑" })
+            {
+                phone.Text = valid;
+                Check(save.Enabled && NewMemberForm.NormalizeRegistrationPhone(valid)?.Length == 10);
+            }
+            Check(NewMemberForm.NormalizeRegistrationPhone("+66 99 000 0001") == "0990000001");
+            typeof(NewMemberForm).GetField("_saving", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, true);
+            phone.Text = "0812345678";
+            Check(!save.Enabled);
+        }
+        using (var legacy = new NewMemberForm(null, new MemberDetail { Id = "synthetic", Phone = "021234567" }))
+            Check(EditField<Button>(legacy, "_btnSave").Enabled && legacy.BuildRequest().Phone == "021234567");
     }
 
     private static void MemberEditing()

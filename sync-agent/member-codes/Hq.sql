@@ -1,5 +1,5 @@
 CREATE PROCEDURE dbo.SCCRM_CreateMemberFromSccrmV2
- @MemberId uniqueidentifier,@Name nvarchar(200),@Phone varchar(30),@Email nvarchar(100)
+ @MemberId uniqueidentifier,@Name nvarchar(200),@Phone varchar(30),@Email nvarchar(100),@DistinctRequest uniqueidentifier=NULL
 AS
 BEGIN
  SET NOCOUNT ON;SET XACT_ABORT ON;SET LOCK_TIMEOUT 1000;SET DEADLOCK_PRIORITY LOW;
@@ -17,6 +17,8 @@ BEGIN
   BEGIN
    IF NOT EXISTS(SELECT 1 FROM dbo.SCCRM_MemberCodeAssignments a JOIN dbo.TCNMCst c WITH(UPDLOCK,HOLDLOCK) ON c.FTCstCode=a.ada_code
     WHERE a.assignment_id=@AssignmentId AND a.hq_identity='__HQ_IDENTITY__'
+    AND ((@DistinctRequest IS NULL AND a.registration_confirmation IS NULL)
+      OR a.registration_confirmation=@DistinctRequest)
     AND CONVERT(varbinary(max),a.profile_name)=CONVERT(varbinary(max),@Name)
     AND CONVERT(varbinary(max),a.profile_phone)=CONVERT(varbinary(max),@Phone)
     AND CONVERT(varbinary(max),a.profile_email)=CONVERT(varbinary(max),@Email)
@@ -31,7 +33,7 @@ BEGIN
   BEGIN
    IF EXISTS(SELECT 1 FROM dbo.SCCRM_LiveMemberLink WITH(UPDLOCK,HOLDLOCK) WHERE member_id=@MemberId)
     RAISERROR('MEMBER_CODES_EXPLICIT_MIGRATION_REQUIRED',16,1);
-   IF EXISTS(SELECT 1 FROM dbo.TCNMCst WITH(UPDLOCK,HOLDLOCK) WHERE
+   IF @DistinctRequest IS NULL AND EXISTS(SELECT 1 FROM dbo.TCNMCst WITH(UPDLOCK,HOLDLOCK) WHERE
     REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(FTCstTel,''),' ',''),'-',''),'(',''),')',''),'+',''),'.','') LIKE '%'+@Phone+'%'
     OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(FTCstTel,''),' ',''),'-',''),'(',''),')',''),'+',''),'.','') LIKE '%66'+SUBSTRING(@Phone,2,9)+'%')
     RAISERROR('MEMBER_CODES_EXISTING_CUSTOMER_REVIEW',16,1);
@@ -45,8 +47,8 @@ BEGIN
    IF @@ROWCOUNT<>1 RAISERROR('MEMBER_CODES_INSERT_NOT_CONFIRMED',16,1);
    INSERT dbo.SCCRM_LiveMemberLink(member_id,ada_code,created_at,profile_name,profile_phone,profile_email)
     VALUES(@MemberId,@Code,GETDATE(),@Name,@Phone,@Email);
-   INSERT dbo.SCCRM_MemberCodeAssignments(assignment_id,member_id,ada_code,previous_code,assignment_kind,hq_identity,profile_name,profile_phone,profile_email,assigned_at)
-    VALUES(@AssignmentId,@MemberId,@Code,NULL,'hq_create','__HQ_IDENTITY__',@Name,@Phone,@Email,GETUTCDATE());
+   INSERT dbo.SCCRM_MemberCodeAssignments(assignment_id,member_id,ada_code,previous_code,assignment_kind,hq_identity,profile_name,profile_phone,profile_email,assigned_at,registration_confirmation)
+    VALUES(@AssignmentId,@MemberId,@Code,NULL,CASE WHEN @DistinctRequest IS NULL THEN 'hq_create' ELSE 'hq_create_distinct' END,'__HQ_IDENTITY__',@Name,@Phone,@Email,GETUTCDATE(),@DistinctRequest);
    SET @Outcome='created';
   END;
   COMMIT;

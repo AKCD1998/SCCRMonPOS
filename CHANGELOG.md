@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 1.3.21 — 2026-11-10
+
+### 2026-11-10 — Cashier chooses existing member or a different person
+
+- Ask “เคยสมัครไว้แล้วใช่ไหม?” with names, phones and member codes. Buttons use
+  ordinary Thai, never select an existing identity automatically, and allow the
+  cashier to return to the unchanged signup draft.
+- Bind the confirmed choice to an idempotent server request. Keep existing
+  member data; open an explicit editor if an existing member has a medical draft.
+- Deliver explicitly confirmed separate people through an audited HQ-created
+  assignment kind while retaining native code/profile/replay guards. Keep fast
+  member polling from the verified deployed fast-lane baseline.
+- COPY-only HQ/005 acceptance runs native creation and delivery under restricted
+  users, tests replay and preserves all 101 non-PIN columns of old customers.
+  All COPY changes roll back. Live rollout and an app release remain separate.
+
+### 2026-11-10 — Validate mobile numbers before new member registration
+
+- Keep new-member Save disabled until the phone is a Thai mobile with 10 digits
+  beginning 06, 08 or 09. Normalize formatted input and Thai digits before saving.
+- Recheck the input before calling the API and keep the save gate closed during
+  an in-flight request. Existing member edits can retain legacy contact numbers.
 
 ### 2026-11-05 — 1.3.20 Member date editing and medical drafts
 

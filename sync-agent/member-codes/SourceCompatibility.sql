@@ -1,7 +1,7 @@
 -- Operator applies this wrapper LAST, after native/queue/copy acceptance.
 -- Existing signature and legacy error names remain compatible with liveworker.
 CREATE PROCEDURE dbo.SCCRM_CreateMemberFromSccrm
- @MemberId uniqueidentifier,@Name nvarchar(200),@Phone varchar(30),@Email nvarchar(100)
+ @MemberId uniqueidentifier,@Name nvarchar(200),@Phone varchar(30),@Email nvarchar(100),@DistinctRequest uniqueidentifier=NULL
 AS
 BEGIN
  SET NOCOUNT ON;SET XACT_ABORT ON;SET LOCK_TIMEOUT 1000;SET DEADLOCK_PRIORITY LOW;
@@ -23,7 +23,7 @@ BEGIN
   COMMIT;
   IF @Legacy IS NOT NULL
   BEGIN SELECT @Legacy ada_code,CONVERT(varchar(36),@MemberId) member_id,'existing' outcome;RETURN;END;
-  EXEC dbo.SCCRM_CreateMemberFromSccrmV2 @MemberId,@Name,@Phone,@Email;
+  EXEC dbo.SCCRM_CreateMemberFromSccrmV2 @MemberId,@Name,@Phone,@Email,@DistinctRequest;
  END TRY
  BEGIN CATCH
   SET @Error=ERROR_MESSAGE();SET @Number=ERROR_NUMBER();IF XACT_STATE()<>0 ROLLBACK;
