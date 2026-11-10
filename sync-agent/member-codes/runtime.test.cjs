@@ -79,6 +79,13 @@ test('assignment runtime orchestration with isolated real PostgreSQL and native-
       }
       assert.equal((await admin.query('SELECT profile FROM sccrm_member_codes.assignments WHERE assignment_id=$1', [item.assignment.assignmentId])).rows[0].profile.name, item.profile.name);
     });
+    await t.test('explicit separate-person assignment persists and enqueues exactly once', async () => {
+      const item = await make({ kind: 'hq_create_distinct' });
+      await ingestOnce({ authorityPool, source, queue: q, expectedHqIdentity: hq });
+      await ingestOnce({ authorityPool, source, queue: q, expectedHqIdentity: hq });
+      assert.equal((await admin.query('SELECT kind FROM sccrm_member_codes.assignments WHERE assignment_id=$1', [item.assignment.assignmentId])).rows[0].kind, 'hq_create_distinct');
+      assert.equal((await admin.query('SELECT count(*)::int n FROM sccrm_member_codes.jobs WHERE assignment_id=$1', [item.assignment.assignmentId])).rows[0].n, 1);
+    });
     await t.test('approved SC migration preserves old native alias while leaving v1 schema absent', async () => {
       const item = await make({ kind: 'approved_existing', previous: true }); await ingestOnce({ authorityPool, source, queue: q, expectedHqIdentity: hq });
       const alias = (await admin.query('SELECT code,member_id FROM sccrm_member_codes.aliases WHERE code=$1', [item.previousNativeCode])).rows[0];

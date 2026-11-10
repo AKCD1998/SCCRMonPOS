@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -16,9 +17,13 @@ namespace SCCRMonPOS
         private readonly ApiClient    _api;
         private readonly MemberDetail _existing;   // null = create mode
         private bool IsEditMode { get { return _existing != null; } }
+        private bool _saving;
+        private const string PhoneHint = "กรอกมือถือไทย 10 หลัก ขึ้นต้น 06, 08 หรือ 09";
 
         public event Action<MemberSearchResult> MemberSaved;
         public MemberDetail SavedDetail { get; private set; }
+        internal MemberSearchResult SavedMember { get; private set; }
+        private readonly string _registrationRequestId = Guid.NewGuid().ToString("D");
 
         private Models.PharmacyMedRecord _medRecord;
         private string _savedMemberId;
@@ -105,6 +110,35 @@ namespace SCCRMonPOS
             _chkDobUnknown.CheckedChanged += (s, e) => _dtpDob.Enabled = !_chkDobUnknown.Checked;
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
             _btnSave.Click   += async (s, e) => await SaveAsync();
+            _txtPhone.TextChanged += (s, e) => ValidateRegistrationPhone();
+            if (!IsEditMode)
+            {
+                lblPhone.Width = 380;
+                lblPhone.Text = "มือถือไทย 10 หลัก (06 / 08 / 09) *";
+                _txtPhone.MaxLength = 40;
+                ValidateRegistrationPhone();
+            }
+        }
+
+        internal static string NormalizeRegistrationPhone(string value)
+        {
+            if (value == null || value.Length > 40) return null;
+            string phone = Regex.Replace(value, "[๐-๙]", match => ((char)('0' + match.Value[0] - '๐')).ToString());
+            if (!Regex.IsMatch(phone, @"\A[0-9+\s()-]+\z")) return null;
+            phone = Regex.Replace(phone, @"[\s()-]", "");
+            if (phone.StartsWith("+66", StringComparison.Ordinal)) phone = "0" + phone.Substring(3);
+            else if (phone.StartsWith("0066", StringComparison.Ordinal)) phone = "0" + phone.Substring(4);
+            return Regex.IsMatch(phone, @"\A0[689][0-9]{8}\z") ? phone : null;
+        }
+
+        private void ValidateRegistrationPhone()
+        {
+            if (IsEditMode) return;
+            bool valid = NormalizeRegistrationPhone(_txtPhone.Text) != null;
+            _btnSave.Enabled = !_saving && valid;
+            if (_saving) return;
+            if (!valid) SetStatus(PhoneHint, _txtPhone.Text.Length > 0);
+            else if (_lblStatus.Text == PhoneHint) SetStatus("", false);
         }
 
         private void ApplyEditModeStyle()
@@ -144,11 +178,18 @@ namespace SCCRMonPOS
 
         private async Task SaveAsync()
         {
+            if (_saving) return;
             string name  = _txtName.Text.Trim();
             string phone = _txtPhone.Text.Trim();
 
             if (string.IsNullOrWhiteSpace(name))  { SetStatus("กรุณาใส่ชื่อ-นามสกุล", true);  return; }
             if (string.IsNullOrWhiteSpace(phone)) { SetStatus("กรุณาใส่เบอร์โทรศัพท์", true); return; }
+            if (!IsEditMode)
+            {
+                phone = NormalizeRegistrationPhone(phone);
+                if (phone == null) { SetStatus(PhoneHint, true); _txtPhone.Focus(); return; }
+                _txtPhone.Text = phone;
+            }
             if (_medRecordForm != null && !_medRecordForm.IsDisposed)
             {
                 SetStatus("กรุณากดใช้ข้อมูลนี้หรือยกเลิกในหน้าเวชระเบียนก่อน", true);
@@ -157,6 +198,7 @@ namespace SCCRMonPOS
             }
 
             SetStatus(IsEditMode ? "กำลังบันทึกการแก้ไข…" : "กำลังบันทึก…", false, Color.DimGray);
+            _saving = true;
             _btnSave.Enabled = false;
 
             var request = BuildRequest();
@@ -167,14 +209,16 @@ namespace SCCRMonPOS
             {
                 result = IsEditMode
                     ? await _api.UpdateMemberAsync(_existing.Id, request)
-                    : await _api.CreateMemberAsync(request);
+                    : await RegisterMemberAsync(request);
             }
             catch (Exception ex) { errorMsg = ex.Message; }
 
-            if (errorMsg != null)
+            if (errorMsg != null || result == null)
             {
-                SetStatus(MapError(errorMsg), true);
+                _saving = false;
                 _btnSave.Enabled = true;
+                ValidateRegistrationPhone();
+                if (errorMsg != null) SetStatus(MapError(errorMsg), true);
                 return;
             }
 
@@ -206,9 +250,48 @@ namespace SCCRMonPOS
                 _savedMemberId = result != null ? result.Id : null;
             }
 
+            SavedMember = result;
             MemberSaved?.Invoke(result);
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        private bool CanShowRegistrationQuestion()
+        {
+            var cashier = Owner as MemberClaimForm;
+            return Visible && WindowState != FormWindowState.Minimized && cashier?.IsParkedForSales?.Invoke() != true;
+        }
+
+        private async Task<MemberSearchResult> RegisterMemberAsync(CreateMemberRequest request)
+        {
+            SetStatus("กำลังตรวจว่าเคยสมัครไว้หรือยัง…", false, Color.DimGray);
+            var options = await _api.GetRegistrationOptionsAsync(request, _registrationRequestId);
+            string action = options.CompletedAction ?? "new", candidateId = null;
+            if (string.IsNullOrWhiteSpace(options.CompletedMemberId) && options.Candidates.Length > 0)
+            {
+                if (!CanShowRegistrationQuestion()) { SetStatus("พบชื่อที่ใช้เบอร์นี้ กดบันทึกอีกครั้งเมื่อพร้อมเลือก", false); return null; }
+                using (var question = new RegistrationMatchForm(options.Candidates))
+                {
+                    if (question.ShowDialog(this) != DialogResult.OK) { SetStatus("แก้ข้อมูลแล้วกดบันทึกอีกครั้งได้เลย", false); return null; }
+                    action = question.UseExisting ? "existing" : "new";
+                    candidateId = question.SelectedCandidateId;
+                }
+            }
+            SetStatus("กำลังบันทึกข้อมูลที่เลือก…", false, Color.DimGray);
+            var result = await _api.ConfirmMemberRegistrationAsync(request, options, action, candidateId);
+            if (action == "existing" && _medRecord != null)
+            {
+                var detail = await _api.GetMemberAsync(result.Id);
+                detail.PharmacyMedRecord = _medRecord;
+                if (!CanShowRegistrationQuestion()) { SetStatus("เลือกชื่อเดิมแล้ว กดบันทึกอีกครั้งเพื่อดูข้อมูลเวชระเบียนที่กรอกไว้", false); return null; }
+                using (var edit = new NewMemberForm(_api, detail))
+                {
+                    if (edit.ShowDialog(this) != DialogResult.OK) return null;
+                    result = edit.SavedMember;
+                    SavedDetail = edit.SavedDetail;
+                }
+            }
+            return result;
         }
 
         internal CreateMemberRequest BuildRequest()

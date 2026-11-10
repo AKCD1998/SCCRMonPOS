@@ -12,8 +12,8 @@ BEGIN
   EXEC dbo.SCCRM_AssertMemberCodeProfile @MemberId,@Name,@Phone,@Email;
   IF @AssignmentId IS NULL OR @HqCode IS NULL OR DATALENGTH(@HqCode)<>12
    OR @HqCode COLLATE Latin1_General_BIN NOT LIKE 'AR000-[0-9][0-9][0-9][0-9][0-9][0-9]'
-   OR @Kind COLLATE Latin1_General_BIN NOT IN('hq_create','approved_existing') OR @Kind IS NULL
-   OR (@Kind='hq_create' AND @PreviousCode IS NOT NULL)
+   OR @Kind COLLATE Latin1_General_BIN NOT IN('hq_create','hq_create_distinct','approved_existing') OR @Kind IS NULL
+   OR (@Kind IN('hq_create','hq_create_distinct') AND @PreviousCode IS NOT NULL)
    OR (@Kind='approved_existing' AND (@PreviousCode IS NULL OR CONVERT(varbinary(max),@PreviousCode)<>CONVERT(varbinary(max),@ExpectedPrevious)))
    OR @ProfileHash IS NULL OR DATALENGTH(@ProfileHash)<>64 OR @ProfileHash COLLATE Latin1_General_BIN LIKE '%[^0-9a-f]%'
    OR @AssignmentHash IS NULL OR DATALENGTH(@AssignmentHash)<>64 OR @AssignmentHash COLLATE Latin1_General_BIN LIKE '%[^0-9a-f]%'
@@ -128,11 +128,11 @@ BEGIN
    IF EXISTS(SELECT 1 FROM dbo.SCCRM_MemberCodeReceipts WITH(UPDLOCK,HOLDLOCK) WHERE member_id=@MemberId OR ada_code=@HqCode)
     OR EXISTS(SELECT 1 FROM dbo.TCNMCst WITH(UPDLOCK,HOLDLOCK,INDEX(PK_TCNMCst)) WHERE FTCstCode=@HqCode)
     RAISERROR('MEMBER_CODES_UNOWNED_CODE_COLLISION_REVIEW',16,1);
-   IF EXISTS(SELECT 1 FROM dbo.TCNMCst WITH(UPDLOCK,HOLDLOCK) WHERE (@Previous IS NULL OR FTCstCode<>@Previous) AND (
+   IF @Kind<>'hq_create_distinct' AND EXISTS(SELECT 1 FROM dbo.TCNMCst WITH(UPDLOCK,HOLDLOCK) WHERE (@Previous IS NULL OR FTCstCode<>@Previous) AND (
     REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(FTCstTel,''),' ',''),'-',''),'(',''),')',''),'+',''),'.','') LIKE '%'+@Phone+'%'
     OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(FTCstTel,''),' ',''),'-',''),'(',''),')',''),'+',''),'.','') LIKE '%66'+SUBSTRING(@Phone,2,9)+'%'))
     RAISERROR('MEMBER_CODES_EXISTING_CUSTOMER_REVIEW',16,1);
-   IF @Kind='hq_create'
+   IF @Kind IN('hq_create','hq_create_distinct')
    BEGIN
     IF @Previous IS NOT NULL OR EXISTS(SELECT 1 FROM dbo.SCCRM_FanoutMemberLink WITH(UPDLOCK,HOLDLOCK) WHERE member_id=@MemberId)
      RAISERROR('MEMBER_CODES_LEGACY_MIGRATION_REQUIRED',16,1);

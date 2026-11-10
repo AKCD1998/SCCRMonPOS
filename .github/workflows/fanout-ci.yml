@@ -1,10 +1,10 @@
 name: Member fanout checks
 on:
   pull_request:
-    paths: ['sync-agent/fanout/**', 'sync-agent/member-codes/**', 'sync-agent/history/model.cjs', 'sync-agent/live/schema.sql', 'sync-agent/package*.json', '.github/workflows/fanout-ci.yml']
+    paths: ['sync-agent/fanout/**', 'sync-agent/member-codes/**', 'sync-agent/history/model.cjs', 'sync-agent/live/**', 'sync-agent/package*.json', '.github/workflows/fanout-ci.yml']
   push:
     branches: [master]
-    paths: ['sync-agent/fanout/**', 'sync-agent/member-codes/**', 'sync-agent/history/model.cjs', 'sync-agent/live/schema.sql', 'sync-agent/package*.json', '.github/workflows/fanout-ci.yml']
+    paths: ['sync-agent/fanout/**', 'sync-agent/member-codes/**', 'sync-agent/history/model.cjs', 'sync-agent/live/**', 'sync-agent/package*.json', '.github/workflows/fanout-ci.yml']
 permissions:
   contents: read
 jobs:
@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: sync-agent/package-lock.json
       - run: npm ci --ignore-scripts
       - name: SC regressions, AR authority, durable queue and publication
-        run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs fanout/operator.test.cjs fanout/sql-adapter.test.cjs fanout/local-secrets.test.cjs member-codes/*.test.cjs
+        run: node --test --test-concurrency=1 fanout/engine.test.cjs fanout/engine-postgres.test.cjs fanout/copy-lab.test.cjs fanout/worker.test.cjs fanout/operator.test.cjs fanout/sql-adapter.test.cjs fanout/local-secrets.test.cjs member-codes/*.test.cjs live/registration-confirmation.test.cjs
   windows:
     runs-on: windows-latest
     defaults:

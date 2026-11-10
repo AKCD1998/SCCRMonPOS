@@ -11,7 +11,8 @@ CREATE TABLE dbo.SCCRM_MemberCodeScope(
 CREATE TABLE dbo.SCCRM_MemberCodeAssignments(
  assignment_id uniqueidentifier NOT NULL PRIMARY KEY,member_id uniqueidentifier NOT NULL UNIQUE,
  ada_code varchar(20) NOT NULL UNIQUE,previous_code varchar(20) NULL,
- assignment_kind varchar(24) NOT NULL CHECK(assignment_kind IN('hq_create','approved_existing')),
+ assignment_kind varchar(24) NOT NULL CHECK(assignment_kind IN('hq_create','hq_create_distinct','approved_existing')),
+ registration_confirmation uniqueidentifier NULL,
  hq_identity varchar(160) NOT NULL,profile_name nvarchar(200) NOT NULL,
  profile_phone varchar(30) NOT NULL,profile_email nvarchar(100) NOT NULL,assigned_at datetime NOT NULL
 );

@@ -200,6 +200,27 @@ namespace SCCRMonPOS
         public PharmacyMedRecord PharmacyMedRecord { get; set; }
     }
 
+    [DataContract]
+    public class RegistrationCandidate
+    {
+        [DataMember(Name = "id")] public string Id { get; set; }
+        [DataMember(Name = "name")] public string Name { get; set; }
+        [DataMember(Name = "phone")] public string Phone { get; set; }
+        [DataMember(Name = "memberCode")] public string MemberCode { get; set; }
+        [DataMember(Name = "canUseExisting")] public bool CanUseExisting { get; set; }
+    }
+
+    [DataContract]
+    public class RegistrationOptions
+    {
+        [DataMember(Name = "ok")] public bool Ok { get; set; }
+        [DataMember(Name = "requestId")] public string RequestId { get; set; }
+        [DataMember(Name = "reviewToken")] public string ReviewToken { get; set; }
+        [DataMember(Name = "candidates")] public RegistrationCandidate[] Candidates { get; set; }
+        [DataMember(Name = "completedMemberId")] public string CompletedMemberId { get; set; }
+        [DataMember(Name = "completedAction")] public string CompletedAction { get; set; }
+    }
+
     public class MemberDetail : PointMetadata
     {
         public string Id { get; set; }
@@ -466,6 +487,29 @@ namespace SCCRMonPOS
             }
 
             return ParseMemberSearchResultFromApiResponse(json);
+        }
+
+        public async Task<RegistrationOptions> GetRegistrationOptionsAsync(CreateMemberRequest request, string requestId)
+        {
+            RequireValidToken();
+            string body = BuildCreateOrUpdateMemberJson(request);
+            body = body.Substring(0, body.Length - 1) + ",\"requestId\":" + JsonStr(requestId) + "}";
+            var result = Deserialize<RegistrationOptions>(await PostJsonAsync("/api/members/registration-options", body, _staffToken));
+            if (result == null || !result.Ok || result.RequestId != requestId || result.Candidates == null)
+                throw new ApiException("ยังตรวจรายชื่อไม่สำเร็จ กรุณาลองอีกครั้ง");
+            return result;
+        }
+
+        public async Task<MemberSearchResult> ConfirmMemberRegistrationAsync(CreateMemberRequest request,
+            RegistrationOptions options, string action, string candidateId)
+        {
+            RequireValidToken();
+            if (!string.IsNullOrWhiteSpace(options.CompletedMemberId))
+                return ParseMemberSearchResultFromApiResponse(await GetJsonWithPosKeyAsync("/api/members/" + Uri.EscapeDataString(options.CompletedMemberId)));
+            string body = BuildCreateOrUpdateMemberJson(request);
+            body = body.Substring(0, body.Length - 1) + ",\"registrationDecision\":{\"requestId\":" + JsonStr(options.RequestId) +
+                ",\"reviewToken\":" + JsonStr(options.ReviewToken) + ",\"action\":" + JsonStr(action) + ",\"candidateId\":" + JsonStr(candidateId) + "}}";
+            return ParseMemberSearchResultFromApiResponse(await PostJsonAsync("/api/members/registrations/confirm", body, _staffToken));
         }
 
         public async Task<ReceiptClaimStatus> GetReceiptClaimStatusAsync(string branchCode, string receiptNo)

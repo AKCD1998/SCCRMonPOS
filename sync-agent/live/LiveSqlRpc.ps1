@@ -17,10 +17,26 @@ try{
    'customer' {if(([string]$req.code).Length -gt 20){throw 'CODE_REFUSED'};$rows=Query ('SELECT '+$select+' FROM dbo.TCNMCst WHERE FTCstCode=@code') @{code=$req.code}}
    'receipts' {$rows=Query ("SELECT TOP(100) * FROM dbo.TPSTSalHD WITH(INDEX(IND_TPSTSalHD_FTCstCode)) WHERE "+$filter+" AND (@customer IS NULL OR FTCstCode>@customer OR(FTCstCode=@customer AND FTShdDocNo>@doc)) ORDER BY FTCstCode,FTShdDocNo OPTION(MAXDOP 1)") @{customer=$req.afterCustomer;doc=[string]$req.afterDoc}}
    'lines' {if($req.docs.Count -lt 1 -or $req.docs.Count -gt 100){throw 'DOCUMENT_SCOPE_REFUSED'};$params=@{};$holders=@(for($j=0;$j -lt $req.docs.Count;$j++){if(([string]$req.docs[$j]).Length -gt 20){throw 'DOCUMENT_SCOPE_REFUSED'};$params['d'+$j]=[string]$req.docs[$j];'@d'+$j});$rows=Query ('SELECT * FROM dbo.TPSTSalDT WHERE FTShdDocNo IN('+($holders -join ',')+') ORDER BY FTShdDocNo,FNSdtSeqNo OPTION(MAXDOP 1)') $params}
-   'createMember' {if(([string]$req.memberId) -notmatch '^[a-fA-F0-9-]{36}$' -or ([string]$req.name).Length -gt 200 -or ([string]$req.phone).Length -gt 30 -or ([string]$req.email).Length -gt 100){throw 'PROFILE_NOT_REPRESENTABLE'};$rows=Query 'EXEC dbo.SCCRM_CreateMemberFromSccrm @MemberId=@id,@Name=@name,@Phone=@phone,@Email=@email' @{id=[guid]$req.memberId;name=[string]$req.name;phone=[string]$req.phone;email=[string]$req.email}}
+   'createMember' {
+    if(([string]$req.memberId) -notmatch '^[a-fA-F0-9-]{36}$' -or ([string]$req.name).Length -gt 200 -or ([string]$req.phone).Length -gt 30 -or ([string]$req.email).Length -gt 100){throw 'PROFILE_NOT_REPRESENTABLE'}
+    $parameters=@{id=[guid]$req.memberId;name=[string]$req.name;phone=[string]$req.phone;email=[string]$req.email}
+    $statement='EXEC dbo.SCCRM_CreateMemberFromSccrm @MemberId=@id,@Name=@name,@Phone=@phone,@Email=@email'
+    if($req.distinctRequest){
+     if($c.registrationConfirmationEnabled -ne $true -or ([string]$req.distinctRequest) -cnotmatch '^[a-f0-9-]{36}$'){throw 'REGISTRATION_CONFIRMATION_REFUSED'}
+     $parameters.distinctRequest=[guid]$req.distinctRequest
+     $statement+=',@DistinctRequest=@distinctRequest'
+    }
+    $rows=Query $statement $parameters
+   }
    default {throw 'ACTION_REFUSED'}
   }
   [Console]::WriteLine(([ordered]@{id=$req.id;ok=$true;rows=$rows}|ConvertTo-Json -Depth 7 -Compress))
- }catch{$code='SOURCE_OPERATION_FAILED';if($_.Exception.GetBaseException().Message -match '([A-Z][A-Z_]{6,})'){$code=$Matches[1]};[Console]::WriteLine(([ordered]@{id=$req.id;ok=$false;code=$code}|ConvertTo-Json -Compress))}}
+ }catch{$base=$_.Exception.GetBaseException();$code='SOURCE_OPERATION_FAILED';$connectionLost=$false
+  if($base -is [Data.SqlClient.SqlException] -and $base.Number -in @(-1,2,20,53,64,233,10053,10054,10060,11001)){$code='SOURCE_PROCESS_ENDED';$connectionLost=$true}
+  elseif($base -is [Data.SqlClient.SqlException] -and $base.Number -in @(1205,1222)){$code='MEMBER_CREATE_BUSY'}
+  elseif($base -is [Data.SqlClient.SqlException] -and $base.Number -eq -2){$code='SOURCE_TIMEOUT';$connectionLost=$true}
+  elseif($base.Message -match '([A-Z][A-Z_]{6,})'){$code=$Matches[1]}
+  [Console]::WriteLine(([ordered]@{id=$req.id;ok=$false;code=$code}|ConvertTo-Json -Compress));if($connectionLost){break}
+ }}
 }catch{[Console]::WriteLine(([ordered]@{ok=$false;code='LIVE_SOURCE_START_FAILED';type=$_.Exception.GetBaseException().GetType().Name}|ConvertTo-Json -Compress));exit 1}
 finally{if($db){$db.Dispose()};if($b){$b.Password=''};$password=$null}

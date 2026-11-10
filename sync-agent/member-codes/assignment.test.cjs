@@ -23,6 +23,15 @@ test('authority identity must be supplied out of band and match exactly', () => 
   assert.throws(() => validateAssignment(fixture({ hqIdentity: HQ + '-other' }), options), /HQ_AUTHORITY_IDENTITY_MISMATCH/);
   assert.throws(() => validateAssignment(fixture(), { expectedHqIdentity: ' ' + HQ }), /HQ_AUTHORITY_CONFIG_REQUIRED/);
 });
+
+test('explicitly confirmed distinct person is a separately hashed HQ creation and still requires exact AR000 identity', () => {
+  const approval = fixture({ kind: 'hq_create_distinct' });
+  assert.equal(validateAssignment(approval, options).kind, 'hq_create_distinct');
+  assert.notEqual(assignmentHash(approval, options), assignmentHash(fixture(), options));
+  assert.throws(() => validateAssignment(fixture({ kind: 'hq_create_distinct', adaCode: 'AR003-000095' }), options));
+  const bound = validateDeliveryBinding(job(), approval, options);
+  assert.equal(bound.kind, 'hq_create_distinct');
+});
 test('tuple rejects unknown keys including PIN and embedded profile', () => {
   for (const extra of [{ pin: 'never read' }, { profile: { name: 'not part of tuple' } }, { arbitraryCode: true }]) {
     assert.throws(() => validateAssignment(fixture(extra), options), /ASSIGNMENT_FIELDS_REFUSED/);

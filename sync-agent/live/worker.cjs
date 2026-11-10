@@ -1,9 +1,34 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),readline=require('node:readline'),{spawn,spawnSync}=require('node:child_process'),{Client}=require('pg');
 const {record,hash}=require('../history/model.cjs');
+const {resolveExisting,digestMember}=require('./existing-members.cjs');
+const {configuration,runLane}=require('./scheduler.cjs');
 const ROOT=__dirname,MARKER='ef76cc14-1b6b-49c9-8da7-1bfaea3dd92b',SCOPE='LIVE-HQ000-ADAACC';
 function validate(c,secrets){if(c.scope!=='SCCRM-HQ-LIVE-MEMBERS'||c.marker!==MARKER||c.sql.database!=='AdaAcc'||c.sql.user!=='sccrm_hq_member_sync'||!['tcp:127.0.0.1,49800','tcp:100.90.166.72,49800'].includes(c.sql.server))throw Error('LIVE_SOURCE_CONFIG_REFUSED');const u=new URL(secrets.pgUrl);if(u.hostname!==c.pgHost||u.port!=='5432'||u.pathname!=='/postgres'||!decodeURIComponent(u.username).startsWith('sccrm_hq_live_sync.')||!u.hostname.endsWith('.pooler.supabase.com'))throw Error('LIVE_DESTINATION_CONFIG_REFUSED');return c;}
-class Source{constructor(file,password){this.pending=new Map();this.sequence=0;const env={...process.env,PSModulePath:'C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\Modules'};this.child=spawn('C:/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-File',path.join(ROOT,'LiveSqlRpc.ps1'),'-ConfigFile',file],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});this.child.stderr.on('data',()=>{});readline.createInterface({input:this.child.stdout}).on('line',line=>{let r;try{r=JSON.parse(line.replace(/^\uFEFF/,''));}catch{return;}const job=this.pending.get(r.id);if(!job)return;this.pending.delete(r.id);clearTimeout(job.timer);r.ok?job.resolve(r.rows):job.reject(Error(r.code));});const fail=()=>{for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('SOURCE_PROCESS_ENDED'));}this.pending.clear();};this.child.on('error',fail);this.child.on('exit',fail);this.child.stdin.write(JSON.stringify({action:'init',sqlPassword:password})+'\n');}query(action,params={}){return new Promise((resolve,reject)=>{const id=++this.sequence,timer=setTimeout(()=>{this.pending.delete(id);reject(Error('SOURCE_TIMEOUT'));},20000);this.pending.set(id,{resolve,reject,timer});this.child.stdin.write(JSON.stringify({id,action,...params})+'\n');});}close(){this.child.stdin.end(JSON.stringify({action:'close'})+'\n');}}
+class Source{
+ constructor(file,password){
+  this.pending=new Map();this.sequence=0;this.closed=false;
+  const env={...process.env,PSModulePath:'C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\Modules'};
+  this.child=spawn('C:/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-File',path.join(ROOT,'LiveSqlRpc.ps1'),'-ConfigFile',file],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+  this.child.stderr.on('data',()=>{});
+  readline.createInterface({input:this.child.stdout}).on('line',line=>{
+   let r;try{r=JSON.parse(line.replace(/^\uFEFF/,''));}catch{return;}
+   if(r.ok===false&&r.id===undefined){this.fail('SOURCE_PROCESS_ENDED');return;}
+   const job=this.pending.get(r.id);if(!job)return;this.pending.delete(r.id);clearTimeout(job.timer);
+   r.ok?job.resolve(r.rows):job.reject(Error(r.code));
+  });
+  this.child.on('error',()=>this.fail('SOURCE_PROCESS_ENDED'));this.child.on('exit',()=>this.fail('SOURCE_PROCESS_ENDED'));
+  this.child.stdin.on('error',()=>this.fail('SOURCE_PROCESS_ENDED'));
+  this.child.stdin.write(JSON.stringify({action:'init',sqlPassword:password})+'\n');
+ }
+ fail(code){if(this.closed)return;this.closed=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error(code));}this.pending.clear();this.child.kill();}
+ query(action,params={}){
+  if(this.closed)return Promise.reject(Error('SOURCE_PROCESS_ENDED'));
+  return new Promise((resolve,reject)=>{const id=++this.sequence,timer=setTimeout(()=>this.fail('SOURCE_TIMEOUT'),20000);
+   this.pending.set(id,{resolve,reject,timer});this.child.stdin.write(JSON.stringify({id,action,...params})+'\n');});
+ }
+ close(){if(this.closed)return;this.closed=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('LIVE_SERVICE_STOPPING'));}this.pending.clear();this.child.stdin.end(JSON.stringify({action:'close'})+'\n');}
+}
 function psSecrets(action){const r=spawnSync('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-File',path.join(ROOT,'SecretBridge.ps1'),'-Action',action],{windowsHide:true,encoding:'utf8',timeout:30000,env:{...process.env,PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});if(r.status!==0)throw Error('SECRET_BRIDGE_REFUSED');return r.stdout.trim();}
 async function guard(pg){const r=await pg.query('SELECT marker,scope FROM ada_history.meta');if(r.rows.length!==1||r.rows[0].marker!==MARKER||r.rows[0].scope!==SCOPE)throw Error('LIVE_MIRROR_MARKER_REQUIRED');if((await pg.query('SELECT current_user actor')).rows[0].actor!=='sccrm_hq_live_sync')throw Error('LIVE_PG_ROLE_REFUSED');}
 function serialize(r){return {source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload};}
@@ -15,9 +40,83 @@ async function synchronize(pg,source,status){await guard(pg);const snapshot=cryp
  let afterCustomer=null,afterDoc='';for(;;){const rows=await source.query('receipts',{afterCustomer,afterDoc});if(!rows.length)break;const headers=new Map(rows.map(h=>[h.FTShdDocNo,h]));await send('receipts',rows.map(p=>record('receipts',p)),rows.at(-1).FTShdDocNo);const lines=await source.query('lines',{docs:rows.map(h=>h.FTShdDocNo)});await send('lines',lines.map(p=>record('lines',p,headers)),rows.at(-1).FTShdDocNo);receiptCount+=rows.length;lineCount+=lines.length;afterCustomer=rows.at(-1).FTCstCode;afterDoc=rows.at(-1).FTShdDocNo;status({state:'importing',phase:'history',customerCount,receiptCount,lineCount});}
  return {customerCount,receiptCount,lineCount,written};}
 function profile(row){const phone=String(row.phone_number||'').replace(/\D/g,'').replace(/^66(?=\d{9}$)/,'0'),name=String(row.full_name||'').trim(),email=String(row.email||'').trim().toLowerCase();if(!name||name.length>200||!/^0\d{9}$/.test(phone)||email.length>100)throw Error('PROFILE_NOT_REPRESENTABLE');return {name,phone,email};}
-async function outbound(pg,source){const members=(await pg.query(`SELECT u.id,u.full_name,u.phone_number,u.email FROM public.users u JOIN public.member_profiles m ON m.user_id=u.id WHERE m.is_active=true AND NOT EXISTS(SELECT 1 FROM ada_history.member_links l WHERE l.member_id=u.id) ORDER BY u.id`)).rows;let created=0,review=0;
- for(const m of members){const digest=hash({name:m.full_name,phone:m.phone_number,email:m.email}),old=(await pg.query('SELECT * FROM ada_history.outbound_state WHERE member_id=$1',[m.id])).rows[0];if(old?.profile_hash===digest){if(old.state==='review')review++;continue;}try{const p=profile(m),answer=(await source.query('createMember',{memberId:m.id,...p}))[0];if(!answer||answer.member_id.toLowerCase()!==m.id)throw Error('MEMBER_ACK_IDENTITY_REFUSED');const raw=(await source.query('customer',{code:answer.ada_code}))[0];if(!raw)throw Error('NEW_NATIVE_CUSTOMER_NOT_FOUND');await apply(pg,'customers',[record('customers',raw)],crypto.randomUUID(),answer.ada_code);await pg.query('BEGIN');try{await pg.query('INSERT INTO ada_history.member_links VALUES($1,$2,$3,$4) ON CONFLICT(source_id,ada_code) DO NOTHING',[m.id,'hq000/AdaAcc',answer.ada_code,'native create acknowledgement']);const actual=(await pg.query('SELECT member_id FROM ada_history.member_links WHERE source_id=$1 AND ada_code=$2',['hq000/AdaAcc',answer.ada_code])).rows[0];if(actual.member_id!==m.id)throw Error('MEMBER_LINK_CHANGE_REFUSED');await pg.query("INSERT INTO ada_history.outbound_state(member_id,profile_hash,state,ada_code) VALUES($1,$2,'created',$3) ON CONFLICT(member_id) DO UPDATE SET profile_hash=EXCLUDED.profile_hash,state='created',ada_code=EXCLUDED.ada_code,last_code=NULL,updated_at=now()",[m.id,digest,answer.ada_code]);await pg.query('COMMIT');}catch(e){await pg.query('ROLLBACK');throw e;}created++;}catch(e){const code=/^[A-Z_]{5,80}$/.test(e.message)?e.message:'MEMBER_SYNC_REVIEW';if(/SOURCE_TIMEOUT|SOURCE_PROCESS_ENDED|MEMBER_CREATE_BUSY/.test(code))throw e;await pg.query("INSERT INTO ada_history.outbound_state(member_id,profile_hash,state,last_code) VALUES($1,$2,'review',$3) ON CONFLICT(member_id) DO UPDATE SET profile_hash=EXCLUDED.profile_hash,state='review',last_code=EXCLUDED.last_code,updated_at=now()",[m.id,digest,code]);review++;}}
- return {created,review};}
-async function run(){if(process.env.COMPUTERNAME!=='SERVER')throw Error('HQ_SERVICE_ONLY');const configFile=path.join(ROOT,'config.json'),c=JSON.parse(fs.readFileSync(configFile,'utf8'));psSecrets('Init');const status=state=>{const report={at:new Date().toISOString(),scope:SCOPE,pid:process.pid,...state};fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify(report));};status({state:'waiting-credentials'});while(!fs.existsSync(path.join(ROOT,'runtime/credentials.rsa')))await new Promise(r=>setTimeout(r,1000));const secrets=JSON.parse(Buffer.from(psSecrets('Read'),'base64').toString('utf8'));validate(c,secrets);const source=new Source(configFile,secrets.sqlPassword);const pg=new Client({connectionString:secrets.pgUrl,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8')},connectionTimeoutMillis:8000,query_timeout:20000,application_name:'SCCRM-HQ-LiveSync'});let stopping=false;process.on('SIGTERM',()=>{stopping=true;});try{await pg.connect();await guard(pg);if(!(await pg.query('SELECT pg_try_advisory_lock(731024,1439) locked')).rows[0].locked)throw Error('LIVE_WORKER_ALREADY_RUNNING');let lastFull=0,counts={};while(!stopping&&!fs.existsSync(path.join(ROOT,'runtime/stop.request'))){try{if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){status({state:'paused',...counts});}else{if(Date.now()-lastFull>300000){counts=await synchronize(pg,source,status);lastFull=Date.now();}const sent=await outbound(pg,source);const totals=(await pg.query("SELECT (SELECT count(*)::int FROM ada_history.customers) customers,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='1') sales,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='9') returns,(SELECT count(*)::int FROM ada_history.lines) lines")).rows[0];status({state:'healthy',...totals,lastCycle:counts,outbound:sent});await pg.query("INSERT INTO ada_history.worker_status VALUES('hq000','healthy',$1,now()) ON CONFLICT(worker) DO UPDATE SET state='healthy',details=EXCLUDED.details,updated_at=now()",[JSON.stringify({...totals,outbound:sent})]);}}catch(e){status({state:'retrying',code:/^[A-Z_]{5,80}$/.test(e.message)?e.message:'LIVE_CYCLE_FAILED',...counts});if(/SOURCE_PROCESS_ENDED|Connection terminated|connection closed/i.test(e.message))throw e;}for(let i=0;i<30&&!stopping&&!fs.existsSync(path.join(ROOT,'runtime/stop.request'));i++)await new Promise(r=>setTimeout(r,1000));}}finally{source.close();await pg.end();}}
+async function outbound(pg,source,{onOutcome=()=>{},registrationConfirmationEnabled=false}={}){
+ const contact=registrationConfirmationEnabled?'COALESCE(u.phone_number,m.contact_phone)':'u.phone_number';
+ const approval=registrationConfirmationEnabled?`,(SELECT r.request_id::text FROM sccrm_registration.confirmations r WHERE r.member_id=u.id AND r.action='new' AND r.allow_shared_contact=true ORDER BY r.confirmed_at DESC LIMIT 1) distinct_request_id,
+   (SELECT r.profile_hash FROM sccrm_registration.confirmations r WHERE r.member_id=u.id AND r.action='new' AND r.allow_shared_contact=true ORDER BY r.confirmed_at DESC LIMIT 1) confirmed_profile_hash`:'';
+ const pending=(await pg.query(`SELECT u.id,u.full_name,${contact} AS phone_number,u.email${approval} FROM public.users u JOIN public.member_profiles m ON m.user_id=u.id LEFT JOIN ada_history.outbound_state o ON o.member_id=u.id WHERE m.is_active=true AND NOT EXISTS(SELECT 1 FROM ada_history.member_links l WHERE l.member_id=u.id) ORDER BY(o.member_id IS NOT NULL),o.updated_at NULLS FIRST,u.id LIMIT 100`)).rows;
+ const approved=(await pg.query('SELECT * FROM ada_history.pending_approved_member_links(20)')).rows;
+ const members=[...new Map([...pending,...approved].map(m=>[m.id,m])).values()];
+ let created=0,linked=0,review=0;
+ for(const m of members){
+  const digest=digestMember(m),old=(await pg.query('SELECT * FROM ada_history.outbound_state WHERE member_id=$1',[m.id])).rows[0];
+  if(old?.profile_hash===digest&&old.state==='created'&&!approved.some(a=>a.id===m.id))continue;
+  const observedAt=new Date().toISOString();
+  try{
+   const distinctRequest=registrationConfirmationEnabled&&m.confirmed_profile_hash===digest&&/^[a-f0-9-]{36}$/.test(m.distinct_request_id||'')?m.distinct_request_id:null;
+   if(registrationConfirmationEnabled&&m.distinct_request_id&&!distinctRequest)throw Error('REGISTRATION_CONFIRMATION_PROFILE_CHANGED');
+   const p=profile(m),existing=distinctRequest?null:await resolveExisting(pg,source,m,apply);
+   if(existing){
+    await pg.query("INSERT INTO ada_history.outbound_state(member_id,profile_hash,state,ada_code,last_code) VALUES($1,$2,'created',$3,'EXISTING_MEMBER_LINKED') ON CONFLICT(member_id) DO UPDATE SET profile_hash=EXCLUDED.profile_hash,state='created',ada_code=EXCLUDED.ada_code,last_code=EXCLUDED.last_code,updated_at=now()",[m.id,digest,existing.adaCode]);
+    linked++;onOutcome({memberId:m.id,adaCode:existing.adaCode,kind:'existing',observedAt,confirmedAt:new Date().toISOString()});continue;
+   }
+   // Unchanged conflicts stay held. A new explicit web approval is separately
+   // selected above and can complete publication without another registration.
+   if(old?.profile_hash===digest&&old.state==='review'&&!distinctRequest){review++;continue;}
+   const answer=(await source.query('createMember',{memberId:m.id,...p,...(distinctRequest?{distinctRequest}:{})}))[0];
+   if(!answer||String(answer.member_id).toLowerCase()!==m.id)throw Error('MEMBER_ACK_IDENTITY_REFUSED');
+   const raw=(await source.query('customer',{code:answer.ada_code}))[0];
+   if(!raw)throw Error('NEW_NATIVE_CUSTOMER_NOT_FOUND');
+   await apply(pg,'customers',[record('customers',raw)],crypto.randomUUID(),answer.ada_code);
+   await pg.query('BEGIN');try{
+    await pg.query('INSERT INTO ada_history.member_links VALUES($1,$2,$3,$4) ON CONFLICT(source_id,ada_code) DO NOTHING',[m.id,'hq000/AdaAcc',answer.ada_code,'native create acknowledgement']);
+    const actual=(await pg.query('SELECT member_id FROM ada_history.member_links WHERE source_id=$1 AND ada_code=$2',['hq000/AdaAcc',answer.ada_code])).rows[0];
+    if(actual.member_id!==m.id)throw Error('MEMBER_LINK_CHANGE_REFUSED');
+    await pg.query("INSERT INTO ada_history.outbound_state(member_id,profile_hash,state,ada_code) VALUES($1,$2,'created',$3) ON CONFLICT(member_id) DO UPDATE SET profile_hash=EXCLUDED.profile_hash,state='created',ada_code=EXCLUDED.ada_code,last_code=NULL,updated_at=now()",[m.id,digest,answer.ada_code]);
+    await pg.query('COMMIT');
+   }catch(error){await pg.query('ROLLBACK');throw error;}
+   created++;onOutcome({memberId:m.id,adaCode:answer.ada_code,kind:'created',observedAt,confirmedAt:new Date().toISOString(),hqCommittedAt:answer.assigned_at||null});
+  }catch(error){
+   const code=/^[A-Z_]{5,80}$/.test(error.message)?error.message:'MEMBER_SYNC_REVIEW';
+   if(/SOURCE_TIMEOUT|SOURCE_PROCESS_ENDED|MEMBER_CREATE_BUSY|MEMBER_CODES_BUSY|MEMBER_LINK_SOURCE_CHANGED|MEMBER_LINK_MEMBER_CHANGED/.test(code)||['55P03','40P01','40001','57014','53300','57P01','08000','08006','ECONNRESET'].includes(error.code))throw error;
+   await pg.query("INSERT INTO ada_history.outbound_state(member_id,profile_hash,state,last_code) VALUES($1,$2,'review',$3) ON CONFLICT(member_id) DO UPDATE SET profile_hash=EXCLUDED.profile_hash,state='review',last_code=EXCLUDED.last_code,updated_at=now() WHERE outbound_state.profile_hash<>EXCLUDED.profile_hash OR outbound_state.last_code IS DISTINCT FROM EXCLUDED.last_code",[m.id,digest,code]);review++;
+  }
+ }
+ return {created,linked,review};
+}
+async function run(){
+ if(process.env.COMPUTERNAME!=='SERVER')throw Error('HQ_SERVICE_ONLY');
+ const configFile=path.join(ROOT,'config.json'),c=JSON.parse(fs.readFileSync(configFile,'utf8')),poll=configuration(c);
+ psSecrets('Init');
+ const state={members:{state:'waiting-credentials'},history:{state:'waiting-credentials'},outbound:{},totals:{},outcomes:[]};
+ const publish=()=>{const phase=state.members.state==='healthy'&&state.history.state==='retrying'?'retrying':state.members.state;
+  fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,state:phase,...state.totals,outbound:state.outbound,members:state.members,history:state.history,lastCycle:state.lastCycle,memberPollMs:poll.memberPollMs,historyPollMs:poll.historyPollMs,lastMemberOutcomes:state.outcomes}));};
+ publish();while(!fs.existsSync(path.join(ROOT,'runtime/credentials.rsa')))await new Promise(r=>setTimeout(r,1000));
+ const secrets=JSON.parse(Buffer.from(psSecrets('Read'),'base64').toString('utf8'));validate(c,secrets);
+ const connection={connectionString:secrets.pgUrl,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8')},connectionTimeoutMillis:8000,query_timeout:20000};
+ const historyPg=new Client({...connection,application_name:'SCCRM-HQ-History'}),memberPg=new Client({...connection,application_name:'SCCRM-HQ-FastMembers'});
+ const historySource=new Source(configFile,secrets.sqlPassword),memberSource=new Source(configFile,secrets.sqlPassword);
+ let stopping=false,tasks=[];const stopped=()=>stopping||fs.existsSync(path.join(ROOT,'runtime/stop.request'));
+ process.on('SIGTERM',()=>{stopping=true;});
+ const failed=lane=>error=>{state[lane]={state:'retrying',at:new Date().toISOString(),code:/^[A-Z_]{5,80}$/.test(error.message)?error.message:'LIVE_CYCLE_FAILED'};publish();if(/SOURCE_PROCESS_ENDED|SOURCE_TIMEOUT|Connection terminated|connection closed/i.test(error.message))throw error;};
+ try{
+  await historyPg.connect();await guard(historyPg);
+  if(!(await historyPg.query('SELECT pg_try_advisory_lock(731024,1439) locked')).rows[0].locked)throw Error('LIVE_WORKER_ALREADY_RUNNING');
+  await memberPg.connect();await guard(memberPg);
+  tasks=[runLane({intervalMs:poll.memberPollMs,stopping:stopped,onError:failed('members'),cycle:async()=>{
+   if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.members={state:'paused'};publish();return;}
+   const start=Date.now();state.outbound=await outbound(memberPg,memberSource,{registrationConfirmationEnabled:c.registrationConfirmationEnabled===true,onOutcome:outcome=>{
+    state.outcomes.push(outcome);if(state.outcomes.length>20)state.outcomes.shift();
+    fs.appendFileSync(path.join(ROOT,'status/member-outcomes.jsonl'),JSON.stringify(outcome)+'\n');
+   }});state.members={state:'healthy',at:new Date().toISOString(),durationMs:Date.now()-start};publish();
+   await memberPg.query("INSERT INTO ada_history.worker_status VALUES('hq000','healthy',$1,now()) ON CONFLICT(worker) DO UPDATE SET state='healthy',details=EXCLUDED.details,updated_at=now()",[JSON.stringify({outbound:state.outbound,members:state.members,history:state.history,memberPollMs:poll.memberPollMs})]);
+  }}),runLane({intervalMs:poll.historyPollMs,stopping:stopped,onError:failed('history'),cycle:async()=>{
+   if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.history={state:'paused'};publish();return;}
+   state.lastCycle=await synchronize(historyPg,historySource,progress=>{state.history={...progress,at:new Date().toISOString()};publish();});
+   state.totals=(await historyPg.query("SELECT (SELECT count(*)::int FROM ada_history.customers) customers,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='1') sales,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='9') returns,(SELECT count(*)::int FROM ada_history.lines) lines")).rows[0];
+   state.history={state:'healthy',at:new Date().toISOString()};publish();
+  }})];await Promise.all(tasks);
+ }finally{stopping=true;historySource.close();memberSource.close();await Promise.allSettled(tasks);await Promise.allSettled([historyPg.end(),memberPg.end()]);}
+}
 if(require.main===module)run().catch(e=>{const code=/^[A-Z_]{5,80}$/.test(e.message)?e.message:'LIVE_WORKER_REFUSED';fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({state:'stopped',at:new Date().toISOString(),code}));process.exitCode=1;});
-module.exports={validate,Source,guard,serialize,apply,synchronize,profile,outbound,MARKER,SCOPE};
+module.exports={validate,Source,guard,serialize,apply,synchronize,profile,outbound,run,MARKER,SCOPE};
