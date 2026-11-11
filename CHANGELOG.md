@@ -9,6 +9,8 @@
 - Use restricted view-only source and execute-only HQ identities, copied-SQL
   integration tests and non-PIN preservation audits. Keep customers, Ada points,
   existing member/receipt workers, AdaPos and Shopee outside its write scope.
+- Preserve original receipt ownership even when its customer profile has not
+  arrived in HQ; copy the bill and log the pending directory record separately.
 
 ## HQ receipt worker — 2026-11-11
 

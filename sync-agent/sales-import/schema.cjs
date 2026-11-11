@@ -47,7 +47,7 @@ function receiver(s,database){
  return `CREATE PROCEDURE dbo.SCCRM_SalesApply @Id uniqueidentifier,@Lease uniqueidentifier WITH EXECUTE AS OWNER AS
  BEGIN SET NOCOUNT ON;SET XACT_ABORT ON;SET DEADLOCK_PRIORITY LOW;SET LOCK_TIMEOUT 750;
  IF DB_NAME()<>'${database}' OR NOT EXISTS(SELECT 1 FROM dbo.SCCRM_SalesMeta WHERE marker='${MARKER}' AND schema_hash='${s.hash}') BEGIN RAISERROR('SALES_TARGET_REFUSED',16,1);RETURN;END;
- DECLARE @doc varchar(20),@branch char(3),@packet nvarchar(max),@hash char(64),@xml xml,@resource nvarchar(255),@rc int,@outcome varchar(40),@rows int;
+ DECLARE @doc varchar(20),@branch char(3),@packet nvarchar(max),@hash char(64),@xml xml,@resource nvarchar(255),@rc int,@outcome varchar(40),@rows int,@memberPending bit,@code varchar(80);
  BEGIN TRY BEGIN TRANSACTION;
  SELECT @doc=doc_no,@branch=branch_code,@packet=packet,@hash=payload_hash FROM dbo.SCCRM_SalesJobs WITH(UPDLOCK,ROWLOCK)
  WHERE id=@Id AND lease_token=@Lease AND state='running' AND lease_until>GETUTCDATE();
@@ -63,8 +63,9 @@ function receiver(s,database){
  IF(SELECT COUNT(*) FROM #T0)<>1 OR NOT EXISTS(SELECT 1 FROM #T0 WHERE FTShdDocNo=@doc AND FTBchCode=@branch AND FTPosCode=SUBSTRING(@doc,9,3)
  AND FTShdStaPaid='3' AND FTShdStaDoc='1' AND FTShdDocType=CASE WHEN LEFT(@doc,1)='R' THEN '9' ELSE '1' END AND FCShdGrand IS NOT NULL)
  OR NOT EXISTS(SELECT 1 FROM #T1) RAISERROR('SALES_HEADER_NOT_FINAL',16,1);
+ SET @memberPending=0;
  IF EXISTS(SELECT 1 FROM #T0 h WHERE NULLIF(LTRIM(RTRIM(ISNULL(h.FTCstCode,''))),'') IS NOT NULL AND h.FTCstCode<>'0'
- AND NOT EXISTS(SELECT 1 FROM dbo.TCNMCst c WHERE c.FTCstCode=h.FTCstCode)) RAISERROR('SALES_HQ_MEMBER_MISSING',16,1);
+ AND NOT EXISTS(SELECT 1 FROM dbo.TCNMCst c WHERE c.FTCstCode=h.FTCstCode)) SET @memberPending=1;
  SET @outcome='restored_original';SET @rows=0;
  IF EXISTS(SELECT 1 FROM dbo.SCCRM_SalesJournal WHERE branch_code=@branch AND doc_no=@doc)
  BEGIN
@@ -80,8 +81,9 @@ function receiver(s,database){
   END;
   INSERT dbo.SCCRM_SalesJournal(branch_code,doc_no,job_id,payload_hash,outcome,inserted_rows,committed_at) VALUES(@branch,@doc,@Id,@hash,@outcome,@rows,GETUTCDATE());
  END;
- UPDATE dbo.SCCRM_SalesJobs SET state='succeeded',last_code='SALES_VERIFIED',lease_token=NULL,lease_until=NULL,completed_at=GETUTCDATE(),updated_at=GETUTCDATE() WHERE id=@Id;
- INSERT dbo.SCCRM_SalesEvents(job_id,state,code,occurred_at)VALUES(@Id,'succeeded','SALES_VERIFIED',GETUTCDATE());
+ SET @code=CASE WHEN @memberPending=1 THEN 'SALES_VERIFIED_MEMBER_PENDING' ELSE 'SALES_VERIFIED' END;
+ UPDATE dbo.SCCRM_SalesJobs SET state='succeeded',last_code=@code,lease_token=NULL,lease_until=NULL,completed_at=GETUTCDATE(),updated_at=GETUTCDATE() WHERE id=@Id;
+ INSERT dbo.SCCRM_SalesEvents(job_id,state,code,occurred_at)VALUES(@Id,'succeeded',@code,GETUTCDATE());
  COMMIT TRANSACTION;SELECT @Id id,@doc doc_no,@branch branch_code,@outcome outcome,@rows inserted_rows;
  END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION;DECLARE @error nvarchar(2048);SET @error=CASE WHEN ERROR_NUMBER() IN(2601,2627) THEN 'SALES_NATIVE_KEY_COLLISION' ELSE ERROR_MESSAGE() END;RAISERROR(@error,16,1);END CATCH;
  END;`;

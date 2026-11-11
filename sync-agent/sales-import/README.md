@@ -45,7 +45,10 @@ An identical existing receipt is verified with zero inserts. Only native
 processing/audit fields are ignored for this existing-copy comparison. A
 different owner/amount/item, partial copy, native global void-key collision,
 unexpected trigger or changed identity is held for review, never overwritten.
-Missing HQ member codes retry; they are not created from a sales packet.
+An original member code missing from the HQ customer directory does not block
+the receipt copy. Keep that exact code and log `SALES_VERIFIED_MEMBER_PENDING`;
+never invent, merge or edit a customer profile from a sales packet. The receipt
+is present while its separate member-directory workflow catches up.
 
 The importer and existing receipt-member worker share the same per-bill SQL
 application lock. Receiver SQL pins the database/schema/marker and uses a
