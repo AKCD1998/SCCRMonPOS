@@ -4,6 +4,7 @@ const TABLES=['TPSTSalHD','TPSTSalDT','TPSTSalRC','TPSTSalPD','TPSTSalPG','TPSTS
 const IGNORE=new Set(['FDDateIns','FTTimeIns','FTWhoIns','FDDateUpd','FTTimeUpd','FTWhoUpd','FTShdStaPrcDoc','FTShdStaPrcSpn','FTShdStaPrcCst','FTShdStaPrcGL','FTShdStaPrcStk','FTShdStaPrcLef','FTShdStaPrcCsm','FTSdtStaPrcStk','FTSdtStaPrcStkCrd','FTSrcStaPrc']);
 const MARKER='b740db43-5811-44cb-b072-0480a0b26f19';
 const SCOPE='SCCRM-HQ-SALES-IMPORT-V1';
+const ACTIVE={TPSTSalHD:'TSHD',TPSTSalDT:'TSDT',TPSTSalRC:'TSRC',TPSTSalPD:'TSPD',TPSTSalPG:'TSPG',TPSTVoidDT:'TSVT'};
 function sqlType(c){if(!['varchar','bigint','datetime','float','int'].includes(c.type_name))throw Error('SALES_SCHEMA_TYPE_REVIEW');return c.type_name==='varchar'?`varchar(${c.max_length})`:c.type_name==='float'?`float(${c.precision})`:c.type_name;}
 function schema(probe){
  const cols=probe.columns;if(!Array.isArray(cols)||TABLES.some(t=>!cols.some(c=>c.table_name===t)))throw Error('SALES_SCHEMA_REQUIRED');
@@ -13,11 +14,18 @@ function schema(probe){
 function nativeTableDdl(s,t){return `CREATE TABLE dbo.[${t}](${s.columns.filter(c=>c.table_name===t).map(c=>`[${c.column_name}] ${sqlType(c)} ${c.is_nullable?'NULL':'NOT NULL'}`).join(',')});`;}
 function sourceViews(s,branch){
  if(!['001','003','004','005'].includes(branch))throw Error('SALES_BRANCH_REFUSED');
- return TABLES.map(t=>`CREATE VIEW dbo.[SCCRM_SalesExport_${t}] AS SELECT ${s.columns.filter(c=>c.table_name===t).map(c=>`d.[${c.column_name}]`).join(',')}
- FROM dbo.[${t}] d ${t==='TPSTSalHD'?'':`JOIN dbo.TPSTSalHD h ON h.FTShdDocNo=d.FTShdDocNo`}
- WHERE ${t==='TPSTSalHD'?'d':'h'}.FTBchCode='${branch}' AND ${t==='TPSTSalHD'?'d':'h'}.FTShdStaPaid='3'
- AND ${t==='TPSTSalHD'?'d':'h'}.FTShdStaDoc='1' AND ${t==='TPSTSalHD'?'d':'h'}.FTShdDocType IN('1','9')
- AND ${t==='TPSTSalHD'?'d':'h'}.FDShdDocDate>='20261108';`);
+ const names=s.columns.filter(c=>c.table_name==='TPSTSalHD').map(c=>`d.[${c.column_name}]`).join(',');
+ const final=`d.FTBchCode='${branch}' AND d.FTPosCode IN('001','002') AND d.FTShdStaPaid='3' AND d.FTShdStaDoc='1' AND d.FTShdDocType IN('1','9') AND d.FDShdDocDate>='20261108'`;
+ const header=`CREATE VIEW dbo.[SCCRM_SalesFinalHeaders] AS SELECT ${names},CONVERT(varchar(8),'archive') source_lane FROM dbo.TPSTSalHD d WHERE ${final}
+ ${['001','002'].map(pos=>`UNION ALL SELECT ${names},CONVERT(varchar(8),'${pos}') source_lane FROM dbo.[TSHD${pos}] d WHERE ${final} AND d.FTPosCode='${pos}' AND NOT EXISTS(SELECT 1 FROM dbo.TPSTSalHD a WHERE a.FTShdDocNo=d.FTShdDocNo)`).join('\n')};`;
+ return [header,...TABLES.map(t=>{
+  const cols=s.columns.filter(c=>c.table_name===t).map(c=>`d.[${c.column_name}]`).join(',');
+  if(t==='TPSTSalHD')return `CREATE VIEW dbo.[SCCRM_SalesExport_${t}] AS SELECT ${cols} FROM dbo.SCCRM_SalesFinalHeaders d;`;
+  const archived=`SELECT ${cols} FROM dbo.[${t}] d JOIN dbo.SCCRM_SalesFinalHeaders h ON h.FTShdDocNo=d.FTShdDocNo`;
+  if(!ACTIVE[t])return `CREATE VIEW dbo.[SCCRM_SalesExport_${t}] AS ${archived};`;
+  return `CREATE VIEW dbo.[SCCRM_SalesExport_${t}] AS ${archived} WHERE h.source_lane='archive'
+  ${['001','002'].map(pos=>`UNION ALL SELECT ${cols} FROM dbo.[${ACTIVE[t]}${pos}] d JOIN dbo.SCCRM_SalesFinalHeaders h ON h.FTShdDocNo=d.FTShdDocNo AND h.source_lane='${pos}'`).join('\n')};`;
+ })];
 }
 function receiver(s,database){
  if(database!=='AdaAcc'&&!/^SCCRM_SalesLab_20261111_000$/.test(database))throw Error('SALES_TARGET_DB_REFUSED');
@@ -75,7 +83,7 @@ function receiver(s,database){
  UPDATE dbo.SCCRM_SalesJobs SET state='succeeded',last_code='SALES_VERIFIED',lease_token=NULL,lease_until=NULL,completed_at=GETUTCDATE(),updated_at=GETUTCDATE() WHERE id=@Id;
  INSERT dbo.SCCRM_SalesEvents(job_id,state,code,occurred_at)VALUES(@Id,'succeeded','SALES_VERIFIED',GETUTCDATE());
  COMMIT TRANSACTION;SELECT @Id id,@doc doc_no,@branch branch_code,@outcome outcome,@rows inserted_rows;
- END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION;DECLARE @error nvarchar(2048);SET @error=ERROR_MESSAGE();RAISERROR(@error,16,1);END CATCH;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION;DECLARE @error nvarchar(2048);SET @error=CASE WHEN ERROR_NUMBER() IN(2601,2627) THEN 'SALES_NATIVE_KEY_COLLISION' ELSE ERROR_MESSAGE() END;RAISERROR(@error,16,1);END CATCH;
  END;`;
 }
-module.exports={TABLES,MARKER,SCOPE,IGNORE,schema,sqlType,nativeTableDdl,sourceViews,receiver};
+module.exports={TABLES,MARKER,SCOPE,ACTIVE,IGNORE,schema,sqlType,nativeTableDdl,sourceViews,receiver};

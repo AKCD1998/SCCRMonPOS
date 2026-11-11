@@ -20,6 +20,10 @@ replay-safe unattended branch receiver, so those programs were not enabled.
   The HQ SQL user executes the owned queue/apply procedures only. Neither runtime
   role can directly read customers/PINs or modify sales/customers/points.
 - Paid/finalized sale or return, POS 001/002, 90-second settling interval.
+  Reads both archived TPST tables and matching TSHD/TSDT/TSRC/TSPD/TSPG/TSVT
+  tables for paid, finalized receipts only. Open/cancelled bills are excluded.
+  Archive wins when the same document is in both places; moving a bill out of
+  the daily tables cannot enqueue another copy. Daily tables are read-only.
   Indexed receipt-number pages of 25, normal three-day overlap, no records
   before 2026-11-08. A durable last-complete scan extends the window after longer
   outages; a three-day outage cannot silently skip receipts. Month rollover is

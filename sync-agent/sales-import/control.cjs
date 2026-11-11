@@ -49,7 +49,11 @@ function provision(mode){
  const hq=admin('000',live?'AdaAcc':copyDb('000'));provisionQueue(hq);
  const cfg={scope:meta.SCOPE,schema:s.hash,hq:restricted(hq,'000',true,live,credentials),sources:{}};
  for(const branch of branches){const target=live?admin(branch):admin('000',copyDb(branch));
-  for(const statement of meta.sourceViews(s,branch)){const name=statement.match(/CREATE VIEW dbo\.\[([^\]]+)\]/)[1];const found=sql(target,`SELECT OBJECT_ID('dbo.[${name}]') id`)[0][0].id;if(!found)sql(target,statement);else{const definition=sql(target,`SELECT OBJECT_DEFINITION(OBJECT_ID('dbo.[${name}]')) definition`)[0][0].definition;if(definition.trim()!==statement.trim())throw Error('SALES_EXPORT_VIEW_CHANGED');}}
+  if(!live)sql(target,Object.entries(meta.ACTIVE).flatMap(([native,stem])=>['001','002'].map(pos=>`IF OBJECT_ID('dbo.[${stem+pos}]') IS NULL BEGIN ${meta.nativeTableDdl(s,native).replace('dbo.['+native+']','dbo.['+stem+pos+']')} END;`)).join('\n'));
+  const activeColumns=sql(target,"SELECT t.name table_name,c.name column_name,ty.name type_name,c.max_length,c.precision FROM sys.tables t JOIN sys.columns c ON c.object_id=t.object_id JOIN sys.types ty ON ty.user_type_id=c.user_type_id WHERE t.name IN("+Object.values(meta.ACTIVE).flatMap(stem=>['001','002'].map(pos=>"'"+stem+pos+"'")).join(',')+") ORDER BY t.name,c.column_id")[0];
+  for(const [native,stem]of Object.entries(meta.ACTIVE))for(const pos of ['001','002']){const expected=s.columns.filter(x=>x.table_name===native),columns=activeColumns.filter(x=>x.table_name===stem+pos);if(expected.length!==columns.length||expected.some((x,i)=>['column_name','type_name','max_length','precision'].some(k=>x[k]!==columns[i][k])))throw Error('SALES_ACTIVE_SCHEMA_DIFFERENT');}
+  const existingViews=new Map(sql(target,"SELECT name,OBJECT_DEFINITION(object_id) definition FROM sys.views WHERE name LIKE 'SCCRM_Sales%'")[0].map(x=>[x.name,x.definition]));
+  for(const statement of meta.sourceViews(s,branch)){const name=statement.match(/CREATE VIEW dbo\.\[([^\]]+)\]/)[1];if(!existingViews.has(name))sql(target,statement);else if(existingViews.get(name).trim()!==statement.trim()){if(live)throw Error('SALES_EXPORT_VIEW_CHANGED');sql(target,statement.replace('CREATE VIEW','ALTER VIEW'));}}
   cfg.sources[branch]=restricted(target,branch,false,live,credentials);
  }
  credentials[live?'liveConfig':'copyConfig']=cfg;save(credentials);return {ok:true,mode,schema:s.hash,branches,productionDataWrites:0};
