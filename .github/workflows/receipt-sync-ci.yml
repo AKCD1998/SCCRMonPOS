@@ -29,5 +29,6 @@ jobs:
             if($errors){throw ($errors.Message -join ', ')}
           }
           $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-          & $compiler /nologo /target:exe /r:System.ServiceProcess.dll /out:receipt-host-check.exe sync-agent/receipts/ServiceHost.cs
+          $source=(Resolve-Path 'sync-agent/receipts/ServiceHost.cs').Path
+          & $compiler /nologo /target:exe /r:System.ServiceProcess.dll /out:receipt-host-check.exe $source
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}

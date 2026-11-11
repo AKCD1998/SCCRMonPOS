@@ -38,12 +38,13 @@ try{
  $compile=@(& $compiler /nologo /target:exe /r:System.ServiceProcess.dll ('/out:'+$exe) (Join-Path $PSScriptRoot 'ServiceHost.cs') 2>&1)
  if($LASTEXITCODE -ne 0){throw 'RECEIPT_SERVICE_COMPILE_FAILED'}
  $files=@('run-service.cjs','worker.cjs','native-adapter.cjs','Invoke-ReceiptNative.ps1','secrets.cjs','SecretBridge.ps1','README.md')
- $stage='stage-owned-files';foreach($file in $files){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $root $file) -Force}
+ $stage='stage-owned-files';foreach($file in $files){$destination=Join-Path $root $file;if(Test-Path -LiteralPath $destination){No-Reparse $destination};Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $destination -Force}
  Copy-Item -LiteralPath $exe -Destination (Join-Path $root ($service+'.exe')) -Force
  $peers=@{'000'=@('tcp:127.0.0.1,49800','SERVER');'001'=@('100.81.137.41\SQLEXPRESS','SC_001');'003'=@('100.77.101.94\SQLEXPRESS','POSSRV');'004'=@('100.113.59.42\SQLEXPRESS','SERVER004');'005'=@('100.106.107.80\SQLEXPRESS','POSSRV')}
  $targets=@();foreach($b in @('000','001','003','004','005')){$targets+=@{branch=$b;server=$peers[$b][0];machine=$peers[$b][1];database='AdaAcc'}}
  [IO.File]::WriteAllText((Join-Path $root 'config.json'),(@{scope=$scope;enabled=$false;targets=$targets}|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
- $hashes=@();foreach($file in (@($files)+@($service+'.exe','config.json','.receipt-service-owner.json'))){$path=Join-Path $root $file;No-Reparse $path;$hashes+=@{path=$file;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()}}
+ $stage='hash-package';$ownedFiles=@($files)+@(($service+'.exe'),'config.json','.receipt-service-owner.json')
+ $hashes=@();foreach($file in $ownedFiles){$path=Join-Path $root $file;No-Reparse $path;$hashes+=@{path=$file;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()}}
  $manifest=@{scope=$scope;marker=$marker;sourceCommit=$commit;receiverHash=$receiverHash;files=$hashes}
  [IO.File]::WriteAllText((Join-Path $root 'package-manifest.json'),($manifest|ConvertTo-Json -Depth 7),[Text.UTF8Encoding]::new($false))
  $stage='create-only-owned-service'
