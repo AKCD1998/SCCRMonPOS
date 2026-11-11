@@ -28,3 +28,21 @@ test('cross-target work is rejected before SQL; restarting the worker does not r
  await createWorker(dependency).cycle(targets.find(t=>t.branch==='001'));assert.equal(nativeCalls,0);
  assert.equal(job.targetBranch,'005');
 });
+test('native connection proof is per target, cached only after success and cannot block another target',async()=>{
+ const reads=[],leases=[],statuses=[];let release;
+ const delayed=new Promise(r=>release=r);
+ const worker=createWorker({targets,probe:async t=>{reads.push(t.branch);if(t.branch==='005')await delayed;},
+  api:async(a,b)=>{leases.push(b.targetBranch);return {job:null};},receive:async()=>{},onStatus:s=>statuses.push(s)});
+ const slow=worker.cycle(targets.find(t=>t.branch==='005'));
+ await worker.cycle(targets.find(t=>t.branch==='001'));await worker.cycle(targets.find(t=>t.branch==='001'));
+ assert.deepEqual(leases,['001','001']);assert.equal(reads.filter(b=>b==='001').length,1);
+ assert(statuses.at(-1).targets.find(t=>t.branch==='001').sqlVerified);
+ release();await slow;assert.equal(leases.at(-1),'005');
+});
+test('a failed native connection invalidates the cached proof and must be checked again',async()=>{
+ const job=fixture('005');let probes=0,leases=0;
+ const worker=createWorker({targets,probe:async()=>{if(++probes>1)throw Error('RECEIPT_SOURCE_UNAVAILABLE');},
+  api:async(a)=>a==='lease'?(leases++,{job}):{accepted:true},receive:async()=>{throw Error('RECEIPT_SOURCE_UNAVAILABLE');}});
+ const t=targets.find(t=>t.branch==='005');await worker.cycle(t);await worker.cycle(t);
+ assert.equal(probes,2);assert.equal(leases,1);
+});
