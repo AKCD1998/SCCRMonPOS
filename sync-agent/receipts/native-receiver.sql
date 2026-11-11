@@ -12,7 +12,7 @@ BEGIN
  IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL
  BEGIN RAISERROR('RECEIPT_TIME_AUDIT_REQUIRED',16,1);RETURN;END;
  IF @OperationId IS NULL OR @PayloadHash IS NULL OR LEN(@PayloadHash)<>64 OR @PayloadHash LIKE '%[^a-f0-9]%'
-  OR @AdaCode IS NULL OR LEN(@AdaCode)<1 OR @AdaCode LIKE '%[^A-Z0-9-]%'
+  OR @AdaCode IS NULL OR LEN(@AdaCode)<1 OR @AdaCode='0' OR @AdaCode LIKE '%[^A-Z0-9-]%'
   OR @Branch NOT IN('001','003','004','005') OR @Pos IS NULL OR @Pos NOT IN('001','002')
   OR ('__TARGET__'<>'000' AND @Branch<>'__TARGET__')
   OR @Doc IS NULL OR LEN(@Doc)<1 OR @Doc LIKE '%[^A-Z0-9-]%'
@@ -30,13 +30,18 @@ BEGIN
  CREATE TABLE #Observed(table_name varchar(20) PRIMARY KEY,sale_date datetime,sale_time varchar(8));
  DECLARE @Sql nvarchar(max),@Header sysname,@Detail sysname,@Number int,@Found int,@Changed int,@Writes int,
   @Tables varchar(100),@Replay bit,@Result int,@Resource nvarchar(255),@NativeDate datetime,@NativeTime varchar(8),
-  @NativeTable varchar(20),@Adjusted bit,@Observations xml;
+  @NativeTable varchar(20),@Adjusted bit,@Observations xml,@WalkIn bit;
  SET @Found=0;SET @Writes=0;SET @Tables='';SET @Replay=0;
  BEGIN TRY
   BEGIN TRANSACTION;
   SET @Resource='SCCRM-Receipt-'+@Branch+'-'+@Doc;
   EXEC @Result=sys.sp_getapplock @Resource=@Resource,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=0;
   IF @Result<0 RAISERROR('RECEIPT_BUSY',16,1);
+  -- Ada's verified non-member sentinel is not an individual customer. Only
+  -- explicit SCCRM claim jobs reach this receiver; never infer a person from 0.
+  SET @WalkIn=0;
+  IF EXISTS(SELECT 1 FROM dbo.TCNMCst WHERE FTCstCode='0'
+   AND LTRIM(RTRIM(CONVERT(nvarchar(255),FTCstName))) COLLATE Latin1_General_BIN2=N'ลูกค้าทั่วไป' COLLATE Latin1_General_BIN2) SET @WalkIn=1;
   IF NOT EXISTS(SELECT 1 FROM dbo.TCNMCst WHERE FTCstCode=@AdaCode
    AND LTRIM(RTRIM(CONVERT(nvarchar(255),FTCstName))) COLLATE Latin1_General_BIN2=LTRIM(RTRIM(@ExpectedName)) COLLATE Latin1_General_BIN2
    AND (@ExpectedPhone IS NULL OR ISNULL(LTRIM(RTRIM(FTCstTel)),'')=@ExpectedPhone))
@@ -77,7 +82,8 @@ BEGIN
        AND FCShdGrand IS NOT NULL AND ABS(FCShdGrand-CONVERT(float,@Grand))<0.005)
       RAISERROR(''RECEIPT_FINANCIAL_HEADER_CHANGED'',16,1);
      IF EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
-       AND NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NOT NULL AND FTCstCode<>@AdaCode)
+       AND NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NOT NULL AND FTCstCode<>@AdaCode
+       AND NOT(@WalkIn=1 AND LTRIM(RTRIM(FTCstCode))=''0''))
       RAISERROR(''RECEIPT_OTHER_MEMBER'',16,1);
      IF (SELECT COUNT(*) FROM dbo.'+QUOTENAME(@Detail)+N' WHERE FTBchCode=@Branch AND FTShdDocNo=@Doc)<>(SELECT COUNT(*) FROM #Expected)
       RAISERROR(''RECEIPT_ITEMS_CHANGED'',16,1);
@@ -99,13 +105,14 @@ BEGIN
        CONVERT(varchar(8),CONVERT(datetime,CONVERT(char(10),FDShdDocDate,120)+'' ''+FTShdDocTime,120),108)
        FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc;
      UPDATE dbo.'+QUOTENAME(@Header)+N' WITH(ROWLOCK) SET FTCstCode=@AdaCode
-      WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NULL;
+      WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
+       AND(NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NULL OR(@WalkIn=1 AND LTRIM(RTRIM(FTCstCode))=''0''));
      SET @Changed=@@ROWCOUNT;
      IF NOT EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND FTCstCode=@AdaCode)
       RAISERROR(''RECEIPT_READBACK_FAILED'',16,1);';
     SET @Changed=0;
-    EXEC sys.sp_executesql @Sql,N'@Branch char(3),@Pos char(3),@Doc varchar(20),@AdaCode varchar(20),@Grand decimal(20,2),@TableName varchar(20),@Changed int OUTPUT',
-     @Branch,@Pos,@Doc,@AdaCode,@Grand,@Header,@Changed OUTPUT;
+    EXEC sys.sp_executesql @Sql,N'@Branch char(3),@Pos char(3),@Doc varchar(20),@AdaCode varchar(20),@Grand decimal(20,2),@TableName varchar(20),@WalkIn bit,@Changed int OUTPUT',
+     @Branch,@Pos,@Doc,@AdaCode,@Grand,@Header,@WalkIn,@Changed OUTPUT;
     SET @Writes=@Writes+@Changed;SET @Tables=@Tables+CASE WHEN LEN(@Tables)=0 THEN '' ELSE ',' END+@Header;
    END;
    FETCH NEXT FROM headers INTO @Header;

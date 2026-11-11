@@ -1,5 +1,15 @@
 # Changelog
 
+## Reconcile confirmed historical SCCRM claims — 2026-11-11
+
+- Recognize Ada customer code 0 only when its exact profile is the verified
+  ลูกค้าทั่วไป non-member sentinel. Fill it only for an explicit existing SCCRM
+  receipt claim after all receipt/member/item guards pass; preserve actual owners.
+- Reject 0 as a target member and reject a renamed zero account or other numeric
+  customer codes. Retain replay, native audit and zero point-award behavior.
+- Exercise the sentinel, replay, named-zero-account and other-owner cases on all
+  five guarded SQL copies before upgrading the existing headless receiver.
+
 ## Automatic final receipt-time adoption — 2026-11-11
 
 - Accept Ada's final closing timestamp after exact non-time receipt/member/item

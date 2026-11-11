@@ -19,6 +19,10 @@ lane or requires AdaFront/AdaSmart to remain open.
 - Receiver requires exact member code/profile, branch, POS, receipt, final paid sale
   status, total and every source line's SKU/barcode/unit/quantity/price
   and amount. It only fills an empty `FTCstCode`. Other owners are held for review.
+- A literal customer code `0` is also unassigned only when the actual database's
+  code-0 profile is exactly ลูกค้าทั่วไป. This exception never guesses ownership:
+  an existing cashier-confirmed SCCRM claim supplies the member and frozen bill.
+  A real named zero account, other numeric code or another member stays held.
 - Under `ada-final-time-v1`, matching final native headers supply the canonical
   closing date/time. The immutable submitted snapshot stays unchanged; each
   native target appends submitted/native observations to `SCCRM_ReceiptTimeAudit`.

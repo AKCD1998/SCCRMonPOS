@@ -63,7 +63,15 @@ async function run(branch='005',copy=defaultCopy){
   assert.equal(result.results[0][0].native_sold_at,header.FDShdDocDate.slice(0,10)+'T'+header.FTShdDocTime+'+07:00');
   assert.equal(result.results[1][0].outcome,'replayed');assert.equal(result.results[2][0].audit_rows,1);tests+=4;
  }
- for(const [key,value] of [['grand',header.FCShdGrand+1],['branch',branch==='001'?'003':'001'],['pos',header.FTPosCode==='001'?'002':'001'],['name','A different person'],['phone','0990000000'],
+ const walkInFixture=`UPDATE dbo.${headerTable} SET FTCstCode='0' WHERE FTShdDocNo=@doc AND FTBchCode=@branch;`;
+ const walkIn=await query('BEGIN TRANSACTION;'+walkInFixture+exec+exec+'ROLLBACK TRANSACTION;',params);
+ assert.equal(walkIn.results[0][0].outcome,'applied');assert.equal(walkIn.results[1][0].outcome,'replayed');tests+=2;
+ for(const fixture of ["UPDATE dbo.TCNMCst SET FTCstName=N'An actual named customer' WHERE FTCstCode='0';"+walkInFixture,
+  `UPDATE dbo.${headerTable} SET FTCstCode='000' WHERE FTShdDocNo=@doc AND FTBchCode=@branch;`]){
+  const denied=await query('BEGIN TRY BEGIN TRANSACTION;'+fixture+exec+"ROLLBACK TRANSACTION;SELECT 'unexpected' result;END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION;SELECT ERROR_MESSAGE() result;END CATCH",params);
+  assert.equal(denied.results[0][0].result,'RECEIPT_OTHER_MEMBER');tests++;
+ }
+ for(const [key,value] of [['code','0'],['grand',header.FCShdGrand+1],['branch',branch==='001'?'003':'001'],['pos',header.FTPosCode==='001'?'002':'001'],['name','A different person'],['phone','0990000000'],
   ...['FCSdtQty','FCSdtSetPrice','FCSdtNet','FCSdtDis'].map(key=>['items',itemsXml(items.map((r,i)=>i?r:{...r,[key]:(r[key]||0)+1}))])]){
   const p={...params,[key]:value};
   const result=await query('BEGIN TRY BEGIN TRANSACTION;'+blankFixture+exec+" ROLLBACK TRANSACTION;SELECT 'unexpected' result;END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK TRANSACTION;SELECT ERROR_MESSAGE() result;END CATCH",p);
