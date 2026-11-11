@@ -17,7 +17,7 @@ function createWorker({api,receive,probe=async()=>{},targets,onStatus=()=>{},sto
    if(job.targetBranch!==target.branch||job.payload?.operationId!==job.id)throw Error('RECEIPT_ACK_IDENTITY_REFUSED');
    let outcome;
    try{outcome={state:'succeeded',code:'ADA_RECEIPT_VERIFIED',proof:await receive(target,job)};}
-   catch(error){const code=failureCode(error);outcome={state:REVIEW.test(code)?'review':'retry',code};}
+   catch(error){const code=failureCode(error);if(/^RECEIPT_SOURCE_/.test(code))verified.delete(target.branch);outcome={state:REVIEW.test(code)?'review':'retry',code};}
    const ack=await api('acknowledge',{id:job.id,targetBranch:target.branch,leaseToken:job.leaseToken,payloadHash:job.payloadHash,...outcome});
    if(ack.accepted!==true)throw Error('RECEIPT_ACK_EXPIRED_RETRY');
    state.set(target.branch,{state:outcome.state,sqlVerified:true,code:outcome.code,jobId:job.id,at:new Date().toISOString()});publish();

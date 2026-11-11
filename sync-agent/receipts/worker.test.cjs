@@ -39,3 +39,10 @@ test('native connection proof is per target, cached only after success and canno
  assert(statuses.at(-1).targets.find(t=>t.branch==='001').sqlVerified);
  release();await slow;assert.equal(leases.at(-1),'005');
 });
+test('a failed native connection invalidates the cached proof and must be checked again',async()=>{
+ const job=fixture('005');let probes=0,leases=0;
+ const worker=createWorker({targets,probe:async()=>{if(++probes>1)throw Error('RECEIPT_SOURCE_UNAVAILABLE');},
+  api:async(a)=>a==='lease'?(leases++,{job}):{accepted:true},receive:async()=>{throw Error('RECEIPT_SOURCE_UNAVAILABLE');}});
+ const t=targets.find(t=>t.branch==='005');await worker.cycle(t);await worker.cycle(t);
+ assert.equal(probes,2);assert.equal(leases,1);
+});
