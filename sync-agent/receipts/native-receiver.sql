@@ -9,6 +9,8 @@ BEGIN
  IF DB_NAME()<>'__DATABASE__' OR NOT EXISTS(SELECT 1 FROM dbo.SCCRM_ReceiptSyncMeta WHERE singleton=1
   AND marker='ab01553b-576c-465e-af30-87daa20e2d33' AND target_branch='__TARGET__')
  BEGIN RAISERROR('RECEIPT_TARGET_REFUSED',16,1);RETURN;END;
+ IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL
+ BEGIN RAISERROR('RECEIPT_TIME_AUDIT_REQUIRED',16,1);RETURN;END;
  IF @OperationId IS NULL OR @PayloadHash IS NULL OR LEN(@PayloadHash)<>64 OR @PayloadHash LIKE '%[^a-f0-9]%'
   OR @AdaCode IS NULL OR LEN(@AdaCode)<1 OR @AdaCode LIKE '%[^A-Z0-9-]%'
   OR @Branch NOT IN('001','003','004','005') OR @Pos IS NULL OR @Pos NOT IN('001','002')
@@ -25,8 +27,10 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM #Expected) OR (SELECT COUNT(*) FROM #Expected)>1000
   OR EXISTS(SELECT 1 FROM #Expected WHERE seq<=0 OR LEN(sku)=0 OR qty=0 OR price<0)
  BEGIN RAISERROR('RECEIPT_ITEMS_REFUSED',16,1);RETURN;END;
+ CREATE TABLE #Observed(table_name varchar(20) PRIMARY KEY,sale_date datetime,sale_time varchar(8));
  DECLARE @Sql nvarchar(max),@Header sysname,@Detail sysname,@Number int,@Found int,@Changed int,@Writes int,
-  @Tables varchar(100),@Replay bit,@Result int,@Resource nvarchar(255);
+  @Tables varchar(100),@Replay bit,@Result int,@Resource nvarchar(255),@NativeDate datetime,@NativeTime varchar(8),
+  @NativeTable varchar(20),@Adjusted bit,@Observations xml;
  SET @Found=0;SET @Writes=0;SET @Tables='';SET @Replay=0;
  BEGIN TRY
   BEGIN TRANSACTION;
@@ -65,10 +69,13 @@ BEGIN
     SET @Found=@Found+1;
     SET @Sql=N'
      IF NOT EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WITH(UPDLOCK,ROWLOCK)
-      WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND FTShdDocType=''1'' AND FTShdStaPaid=''3''
-       AND FTShdStaDoc=''1'' AND ABS(FCShdGrand-CONVERT(float,@Grand))<0.005
-       AND CONVERT(varchar(10),FDShdDocDate,120)=CONVERT(varchar(10),@SoldDate,120) AND FTShdDocTime=@SoldTime)
-      RAISERROR(''RECEIPT_HEADER_CHANGED'',16,1);
+      WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND FTShdDocType=''1'')
+      RAISERROR(''RECEIPT_DOCUMENT_KIND_CHANGED'',16,1);
+     IF NOT EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
+       AND FTShdStaPaid=''3'' AND FTShdStaDoc=''1'') RAISERROR(''RECEIPT_NOT_FINAL'',16,1);
+     IF NOT EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
+       AND FCShdGrand IS NOT NULL AND ABS(FCShdGrand-CONVERT(float,@Grand))<0.005)
+      RAISERROR(''RECEIPT_FINANCIAL_HEADER_CHANGED'',16,1);
      IF EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
        AND NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NOT NULL AND FTCstCode<>@AdaCode)
       RAISERROR(''RECEIPT_OTHER_MEMBER'',16,1);
@@ -85,27 +92,49 @@ BEGIN
        OR d.FCSdtNet IS NULL OR ABS(d.FCSdtNet-CONVERT(float,e.net))>0.000001
        OR ABS(ISNULL(d.FCSdtDis,0)-CONVERT(float,e.discount))>0.000001)
       RAISERROR(''RECEIPT_ITEMS_CHANGED'',16,1);
+     IF EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc
+       AND(FDShdDocDate IS NULL OR FTShdDocTime IS NULL OR LEN(FTShdDocTime)=0))
+      RAISERROR(''RECEIPT_FINAL_TIME_UNAVAILABLE'',16,1);
+     INSERT #Observed SELECT @TableName,CONVERT(datetime,CONVERT(char(10),FDShdDocDate,120),120),
+       CONVERT(varchar(8),CONVERT(datetime,CONVERT(char(10),FDShdDocDate,120)+'' ''+FTShdDocTime,120),108)
+       FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc;
      UPDATE dbo.'+QUOTENAME(@Header)+N' WITH(ROWLOCK) SET FTCstCode=@AdaCode
       WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND NULLIF(LTRIM(RTRIM(ISNULL(FTCstCode,''''))),'''') IS NULL;
      SET @Changed=@@ROWCOUNT;
      IF NOT EXISTS(SELECT 1 FROM dbo.'+QUOTENAME(@Header)+N' WHERE FTBchCode=@Branch AND FTPosCode=@Pos AND FTShdDocNo=@Doc AND FTCstCode=@AdaCode)
       RAISERROR(''RECEIPT_READBACK_FAILED'',16,1);';
     SET @Changed=0;
-    EXEC sys.sp_executesql @Sql,N'@Branch char(3),@Pos char(3),@Doc varchar(20),@AdaCode varchar(20),@Grand decimal(20,2),@SoldDate datetime,@SoldTime varchar(8),@Changed int OUTPUT',
-     @Branch,@Pos,@Doc,@AdaCode,@Grand,@SoldDate,@SoldTime,@Changed OUTPUT;
+    EXEC sys.sp_executesql @Sql,N'@Branch char(3),@Pos char(3),@Doc varchar(20),@AdaCode varchar(20),@Grand decimal(20,2),@TableName varchar(20),@Changed int OUTPUT',
+     @Branch,@Pos,@Doc,@AdaCode,@Grand,@Header,@Changed OUTPUT;
     SET @Writes=@Writes+@Changed;SET @Tables=@Tables+CASE WHEN LEN(@Tables)=0 THEN '' ELSE ',' END+@Header;
    END;
    FETCH NEXT FROM headers INTO @Header;
   END;
   CLOSE headers;DEALLOCATE headers;
   IF @Found=0 RAISERROR('RECEIPT_NOT_ARRIVED',16,1);
+  -- The origin's finalized POS table is authoritative while present; retain
+  -- every native observation in the audit. Never rewrite native date/time.
+  SELECT TOP(1) @NativeDate=sale_date,@NativeTime=sale_time,@NativeTable=table_name FROM #Observed
+   ORDER BY CASE WHEN table_name='TSHD'+@Pos THEN 0 ELSE 1 END,table_name;
+  SET @Adjusted=CASE WHEN CONVERT(varchar(10),@NativeDate,120)<>CONVERT(varchar(10),@SoldDate,120) OR @NativeTime<>@SoldTime THEN 1 ELSE 0 END;
+  SET @Observations=(SELECT table_name,sale_date,sale_time FROM #Observed ORDER BY table_name FOR XML PATH('header'),ROOT('headers'),TYPE);
+  IF EXISTS(SELECT 1 FROM dbo.SCCRM_ReceiptTimeAudit WHERE operation_id=@OperationId)
+  BEGIN
+   IF NOT EXISTS(SELECT 1 FROM dbo.SCCRM_ReceiptTimeAudit WHERE operation_id=@OperationId AND payload_hash=@PayloadHash
+    AND submitted_date=@SoldDate AND submitted_time=@SoldTime AND native_date=@NativeDate AND native_time=@NativeTime)
+    RAISERROR('RECEIPT_CANONICAL_TIME_CHANGED',16,1);
+  END ELSE INSERT dbo.SCCRM_ReceiptTimeAudit(operation_id,payload_hash,submitted_date,submitted_time,native_date,native_time,native_time_table,time_adjusted,observations,recorded_at)
+   VALUES(@OperationId,@PayloadHash,@SoldDate,@SoldTime,@NativeDate,@NativeTime,@NativeTable,@Adjusted,@Observations,GETUTCDATE());
   IF @Replay=0 INSERT dbo.SCCRM_ReceiptSyncJournal(operation_id,payload_hash,ada_code,branch_code,pos_code,doc_no,created_at)
    VALUES(@OperationId,@PayloadHash,@AdaCode,@Branch,@Pos,@Doc,GETUTCDATE());
   COMMIT TRANSACTION;
   SELECT LOWER(CONVERT(varchar(36),@OperationId)) operation_id,@PayloadHash payload_hash,@AdaCode ada_code,
    @Doc doc_no,@Branch branch_code,@Pos pos_code,'__TARGET__' target_branch,@Tables tables,
    CASE WHEN @Writes>0 THEN 'applied' WHEN @Replay=1 THEN 'replayed' ELSE 'already_linked' END outcome,
-   CONVERT(varchar(23),GETUTCDATE(),126)+'Z' verified_at;
+   CONVERT(varchar(23),GETUTCDATE(),126)+'Z' verified_at,'ada-final-time-v1' time_policy,
+   CONVERT(varchar(10),@SoldDate,120)+'T'+@SoldTime+'+07:00' submitted_sold_at,
+   CONVERT(varchar(10),@NativeDate,120)+'T'+@NativeTime+'+07:00' native_sold_at,
+   CONVERT(int,@Adjusted) time_adjusted,@NativeTable native_time_table;
  END TRY
  BEGIN CATCH
   IF CURSOR_STATUS('local','headers')>=0 CLOSE headers;

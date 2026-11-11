@@ -12,7 +12,7 @@ function createWorker({api,receive,probe=async()=>{},targets,onStatus=()=>{},sto
   let job;
   try{
    if(!verified.has(target.branch)){await probe(target);verified.add(target.branch);}
-   const data=await api('lease',{targetBranch:target.branch});job=data.job;
+   const data=await api('lease',{targetBranch:target.branch,timePolicy:'ada-final-time-v1'});job=data.job;
    if(!job){state.set(target.branch,{state:'healthy',sqlVerified:true,at:new Date().toISOString()});publish();return;}
    if(job.targetBranch!==target.branch||job.payload?.operationId!==job.id)throw Error('RECEIPT_ACK_IDENTITY_REFUSED');
    let outcome;

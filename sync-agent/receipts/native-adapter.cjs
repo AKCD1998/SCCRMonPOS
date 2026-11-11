@@ -1,6 +1,6 @@
 'use strict';
 const path=require('node:path'),{spawn}=require('node:child_process');
-const REVIEW=/^RECEIPT_(?:OTHER_MEMBER|ALREADY_OWNED|OPERATION_REUSED|MEMBER_REQUIRES_REVIEW|HEADER_CHANGED|ITEMS_CHANGED|AMBIGUOUS_HEADER|SCHEMA_REQUIRES_REVIEW|PACKET_REFUSED|JOB_REFUSED|VOID_POLICY_REFUSED|ACK_.*|READBACK_FAILED|DATABASE_REFUSED|LIVE_TARGET_REFUSED|WORKER_RIGHTS_EXCESSIVE)$/;
+const REVIEW=/^RECEIPT_(?:OTHER_MEMBER|ALREADY_OWNED|OPERATION_REUSED|MEMBER_REQUIRES_REVIEW|HEADER_CHANGED|FINANCIAL_HEADER_CHANGED|DOCUMENT_KIND_CHANGED|CANONICAL_TIME_CHANGED|ITEMS_CHANGED|AMBIGUOUS_HEADER|SCHEMA_REQUIRES_REVIEW|PACKET_REFUSED|JOB_REFUSED|VOID_POLICY_REFUSED|ACK_.*|READBACK_FAILED|DATABASE_REFUSED|LIVE_TARGET_REFUSED|WORKER_RIGHTS_EXCESSIVE)$/;
 function receive(target,credentials,job,{mode='Live',timeout=20000,rollbackCopy=false}={}){
  if(typeof rollbackCopy!=='boolean'||rollbackCopy&&mode!=='Copy')throw Error('RECEIPT_COPY_ONLY');
  return new Promise((resolve,reject)=>{
@@ -14,11 +14,18 @@ function receive(target,credentials,job,{mode='Live',timeout=20000,rollbackCopy=
   child.on('close',code=>{
    try{
     const data=JSON.parse(output.trim().replace(/^\uFEFF/,''));
-    if(code!==0||!data.ok){const value=/^RECEIPT_[A-Z_0-9]{2,70}$/.test(data.code||'')?data.code:'RECEIPT_SOURCE_UNAVAILABLE';throw Object.assign(Error(value),{code:value,stage:data.stage,sqlNumber:data.sqlNumber,requiredSetOptions:data.requiredSetOptions,errorType:data.errorType});}
+    if(code!==0||!data.ok){const value=/^RECEIPT_[A-Z_0-9]{2,70}$/.test(data.code||'')?data.code:'RECEIPT_SOURCE_UNAVAILABLE';throw Object.assign(Error(value),{code:value,stage:data.stage,sqlNumber:data.sqlNumber,...(mode==='Copy'?{copySqlMessage:data.copySqlMessage}:{}),requiredSetOptions:data.requiredSetOptions,errorType:data.errorType});}
     const a=data.result,p=job.payload;
     if(a.operation_id!==job.id||a.payload_hash!==job.payloadHash||a.ada_code!==p.adaCode||a.doc_no!==p.receiptNo||a.branch_code!==p.branchCode||a.pos_code!==p.posCode||a.target_branch!==job.targetBranch)throw Error('RECEIPT_ACK_IDENTITY_REFUSED');
-    done(null,{operationId:a.operation_id,payloadHash:a.payload_hash,adaCode:a.ada_code,receiptNo:a.doc_no,branchCode:a.branch_code,posCode:a.pos_code,
-     targetBranch:a.target_branch,tables:a.tables.split(','),outcome:a.outcome,verifiedAt:a.verified_at});
+    const proof={operationId:a.operation_id,payloadHash:a.payload_hash,adaCode:a.ada_code,receiptNo:a.doc_no,branchCode:a.branch_code,posCode:a.pos_code,
+     targetBranch:a.target_branch,tables:a.tables.split(','),outcome:a.outcome,verifiedAt:a.verified_at};
+    if(a.time_policy!==undefined){
+     if(a.time_policy!=='ada-final-time-v1'||!Number.isFinite(Date.parse(a.native_sold_at))||Date.parse(a.submitted_sold_at)!==Date.parse(p.soldAt)
+       ||!['0','1'].includes(a.time_adjusted)||!proof.tables.includes(a.native_time_table)
+       ||(a.time_adjusted==='1')!==(Date.parse(a.native_sold_at)!==Date.parse(p.soldAt)))throw Error('RECEIPT_ACK_TIME_REFUSED');
+     Object.assign(proof,{timePolicy:a.time_policy,submittedSoldAt:a.submitted_sold_at,nativeSoldAt:a.native_sold_at,timeAdjusted:a.time_adjusted==='1',nativeTimeTable:a.native_time_table});
+    }
+    done(null,proof);
    }catch(e){done(e);}
   });child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({scope:'SCCRM-NATIVE-RECEIPT-V1',target,credentials,job}));
  });

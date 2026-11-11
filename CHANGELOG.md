@@ -1,5 +1,16 @@
 # Changelog
 
+## Automatic final receipt-time adoption — 2026-11-11
+
+- Accept Ada's final closing timestamp after exact non-time receipt/member/item
+  guards, append both timestamps to a protected native audit, and return fenced
+  versioned proof. Fill only a blank member on the existing finalized sale.
+- Request one-time automatic recovery of legacy time holds; retry unfinished
+  receipts while keeping amount/item/owner conflicts under review.
+- Add five isolated SQL copy tests, three-real-receipt adapter checks, non-PIN
+  preservation evidence and a scoped committed-source service/receiver upgrade.
+  Keep desktop clients, member fast lane, Ada points and Shopee unchanged.
+
 ## HQ automatic sales import — 2026-11-11
 
 - Add an isolated headless branch-to-HQ finalized-sales importer, with a durable
