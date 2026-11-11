@@ -22,11 +22,11 @@ try{
   foreach($column in @('FTShdDocNo','FTBchCode','FTPosCode','FTCstCode','FTShdDocType','FTShdStaPaid','FTShdStaDoc','FCShdGrand','FDShdDocDate','FTShdDocTime')){if($column -cnotin $cols.name){throw 'RECEIPT_PROVISION_HEADER_REVIEW_REQUIRED'}}
  }
  $login='sccrm_receipt_sync_'+$b
- $existing=Rows "SELECT name FROM sys.objects WHERE schema_id=SCHEMA_ID('dbo') AND name IN('SCCRM_ReceiptSyncMeta','SCCRM_ReceiptSyncJournal','SCCRM_AttachReceiptMember')"
+ $existing=Rows "SELECT name FROM sys.objects WHERE schema_id=SCHEMA_ID('dbo') AND name IN('SCCRM_ReceiptSyncMeta','SCCRM_ReceiptSyncJournal','SCCRM_AttachReceiptMember','SCCRM_ReceiptTimeAudit')"
  if($existing.Count){
-  if($existing.Count -ne 3){throw 'RECEIPT_PROVISION_EXISTING_OBJECT_REFUSED'}
+  if($existing.Count -notin @(3,4)){throw 'RECEIPT_PROVISION_EXISTING_OBJECT_REFUSED'}
   $own=Rows "SELECT singleton,CONVERT(varchar(36),marker) marker,target_branch,worker_login FROM dbo.SCCRM_ReceiptSyncMeta"
-  if($own.Count -ne 1 -or $own[0].marker -cne 'ab01553b-576c-465e-af30-87daa20e2d33' -or $own[0].target_branch -cne $b -or $own[0].worker_login -cne $login){throw 'RECEIPT_PROVISION_EXISTING_OBJECT_REFUSED'}
+  if($own.Count -ne 1 -or ([string]$own[0].marker).ToLowerInvariant() -cne 'ab01553b-576c-465e-af30-87daa20e2d33' -or $own[0].target_branch -cne $b -or $own[0].worker_login -cne $login){throw 'RECEIPT_PROVISION_EXISTING_OBJECT_REFUSED'}
   if($Action -ceq 'Install'){throw 'RECEIPT_PROVISION_ALREADY_INSTALLED'}
  }
  $counts=(Rows 'SELECT COUNT(*) customers FROM dbo.TCNMCst')[0]
@@ -44,9 +44,11 @@ try{
    CREATE TABLE dbo.SCCRM_ReceiptSyncJournal(operation_id uniqueidentifier PRIMARY KEY,payload_hash char(64) NOT NULL,ada_code varchar(20) NOT NULL,
     branch_code char(3) NOT NULL,pos_code char(3) NOT NULL,doc_no varchar(20) NOT NULL,created_at datetime NOT NULL,UNIQUE(branch_code,doc_no));"
   $stage='owned-procedure'
+  Run ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'native-time-audit.sql')))
   $sql=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'native-receiver.sql')).Replace('__DATABASE__','AdaAcc').Replace('__TARGET__',$b)
   Run $sql
   Run "GRANT EXECUTE ON dbo.SCCRM_AttachReceiptMember TO [$login];DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.TCNMCst TO [$login];DENY INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptSyncMeta TO [$login];DENY INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptSyncJournal TO [$login];"
+  Run "DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptTimeAudit TO [$login];"
   foreach($name in @('TPSTSalHD','TSHD001','TSHD002','TPSTSalDT','TSDT001','TSDT002','TCNTCstPoint')){
    if((Rows "SELECT OBJECT_ID('dbo.$name') id")[0].id){Run "DENY INSERT,UPDATE,DELETE,ALTER ON dbo.[$name] TO [$login]"}
   }

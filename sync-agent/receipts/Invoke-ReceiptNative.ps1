@@ -8,7 +8,7 @@ try{
  if($p.scope -cne 'SCCRM-NATIVE-RECEIPT-V1' -or $branch -cnotmatch '^(000|001|003|004|005)$'){throw 'RECEIPT_SCOPE_REFUSED'}
  $peers=@{'000'=@('100.90.166.72','SERVER');'001'=@('100.81.137.41','SC_001');'003'=@('100.77.101.94','POSSRV');'004'=@('100.113.59.42','SERVER004');'005'=@('100.106.107.80','POSSRV')}
  if($Mode -ceq 'Copy'){
-  if($t.server -cne 'tcp:100.90.166.72,49800' -or $t.machine -cne 'SERVER' -or $t.database -cne ('SCCRM_FanoutCopy_20261029_'+$branch)){throw 'RECEIPT_COPY_TARGET_REFUSED'}
+  if($t.server -cne 'tcp:100.90.166.72,49800' -or $t.machine -cne 'SERVER' -or $t.database -cnotin @(('SCCRM_FanoutCopy_20261029_'+$branch),('SCCRM_ReceiptTimeCopy_20261111_'+$branch))){throw 'RECEIPT_COPY_TARGET_REFUSED'}
  }else{
   $servers=if($branch -ceq '000'){@('tcp:127.0.0.1,49800','tcp:100.90.166.72,49800')}else{@($peers[$branch][0]+'\SQLEXPRESS')}
   if($t.server -cnotin $servers -or $t.machine -cne $peers[$branch][1] -or $t.database -cne 'AdaAcc' -or $p.credentials.user -cne ('sccrm_receipt_sync_'+$branch)){throw 'RECEIPT_LIVE_TARGET_REFUSED'}
@@ -37,6 +37,9 @@ try{
  $r=$q.ExecuteReader();if(!$r.Read() -or $r['machine'] -cne $t.machine -or $r['database_name'] -cne $t.database){throw 'RECEIPT_DATABASE_REFUSED'}
  if($Mode -ceq 'Live' -and ($r['actor'] -cne ('sccrm_receipt_sync_'+$branch) -or $r['elevated'] -ne 0 -or $r['db_owner'] -ne 0 -or $r['writer'] -ne 0)){throw 'RECEIPT_WORKER_RIGHTS_EXCESSIVE'}
  $r.Dispose();$r=$null;$q.Dispose();$q=$null
+ if($Mode -ceq 'Copy' -and $t.database.StartsWith('SCCRM_ReceiptTimeCopy_')){
+  $q=$db.CreateCommand();$q.CommandTimeout=5;$q.CommandText="IF NOT EXISTS(SELECT 1 FROM dbo.SCCRM_TimeCopyOwner WHERE marker='4afc7446-846e-4d6a-8a1b-e672655b1a38') RAISERROR('RECEIPT_COPY_TARGET_REFUSED',16,1);";$null=$q.ExecuteNonQuery();$q.Dispose();$q=$null
+ }
  $stage='apply';if($RollbackCopy){$copyTx=$db.BeginTransaction()};$q=$db.CreateCommand();if($copyTx){$q.Transaction=$copyTx};$q.CommandTimeout=10;$q.CommandType=[Data.CommandType]::StoredProcedure;$q.CommandText='dbo.SCCRM_AttachReceiptMember'
  $values=@{OperationId=@([Data.SqlDbType]::UniqueIdentifier,[guid]$j.id);PayloadHash=@([Data.SqlDbType]::Char,[string]$j.payloadHash);AdaCode=@([Data.SqlDbType]::VarChar,[string]$body.adaCode);Branch=@([Data.SqlDbType]::Char,[string]$body.branchCode);Pos=@([Data.SqlDbType]::Char,[string]$body.posCode);Doc=@([Data.SqlDbType]::VarChar,[string]$body.receiptNo);ExpectedName=@([Data.SqlDbType]::NVarChar,[string]$body.expectedName);ExpectedPhone=@([Data.SqlDbType]::VarChar,$(if($body.expectedPhone){[string]$body.expectedPhone}else{[DBNull]::Value}));Items=@([Data.SqlDbType]::Xml,$xml.OuterXml)}
  $sizes=@{PayloadHash=64;AdaCode=20;Branch=3;Pos=3;Doc=20;ExpectedName=255;ExpectedPhone=30}
@@ -54,5 +57,5 @@ try{
 }catch{
  $e=$_.Exception.GetBaseException();$message=$e.Message;$code=if($message -cmatch '^RECEIPT_[A-Z_0-9]+$'){$message}elseif($e -is [Data.SqlClient.SqlException] -and $e.Number -in @(-2,53,64,121,233,258,1205,1222,10053,10054,10060)){'RECEIPT_SOURCE_RETRY'}else{'RECEIPT_SOURCE_UNAVAILABLE'}
  $requiredSetOptions=@('ANSI_NULLS','ANSI_PADDING','ANSI_WARNINGS','ARITHABORT','CONCAT_NULL_YIELDS_NULL','QUOTED_IDENTIFIER','NUMERIC_ROUNDABORT')|Where-Object{$message.Contains($_)}
- @{ok=$false;code=$code;stage=$stage;sqlNumber=$(if($e -is [Data.SqlClient.SqlException]){$e.Number}else{$null});requiredSetOptions=@($requiredSetOptions);errorType=$e.GetType().Name;detailsWithheld=$true}|ConvertTo-Json -Compress;exit 1
+ @{ok=$false;code=$code;stage=$stage;sqlNumber=$(if($e -is [Data.SqlClient.SqlException]){$e.Number}else{$null});copySqlMessage=$(if($Mode -ceq 'Copy'){$message}else{$null});requiredSetOptions=@($requiredSetOptions);errorType=$e.GetType().Name;detailsWithheld=($Mode -ceq 'Live')}|ConvertTo-Json -Compress;exit 1
 }finally{if($r){$r.Dispose()};if($q){$q.Dispose()};if($copyTx){try{$copyTx.Rollback()}catch{};$copyTx.Dispose()};if($db){$db.Dispose()};if($builder){$builder['Password']=''};if($p){$p.credentials.password=''}}

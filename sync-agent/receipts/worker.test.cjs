@@ -17,7 +17,7 @@ test('offline sources retry, owner conflicts are held and lost replies retain th
  const worker=createWorker({targets,api:async(a,b)=>{if(a==='lease')return {job};if(failAck){failAck=false;throw Error('offline response');}acks.push(b);return {accepted:true};},receive:async(t,j)=>{calls.push(j.id);return {operationId:j.id};}});
  const target=targets.find(t=>t.branch==='005');await worker.cycle(target);await worker.cycle(target);
  assert.deepEqual(calls,[job.id,job.id]);assert.equal(acks.length,1);assert.equal(acks[0].id,job.id);
- for(const [code,state] of [['RECEIPT_SOURCE_UNAVAILABLE','retry'],['RECEIPT_OTHER_MEMBER','review']]){
+ for(const [code,state] of [['RECEIPT_SOURCE_UNAVAILABLE','retry'],['RECEIPT_NOT_FINAL','retry'],['RECEIPT_OTHER_MEMBER','review'],['RECEIPT_FINANCIAL_HEADER_CHANGED','review'],['RECEIPT_DOCUMENT_KIND_CHANGED','review'],['RECEIPT_CANONICAL_TIME_CHANGED','review']]){
   const w=createWorker({targets,api:async(a,b)=>a==='lease'?{job}:(acks.push(b),{accepted:true}),receive:async()=>{throw Error(code);}});
   await w.cycle(target);assert.equal(acks.at(-1).state,state);assert.equal(acks.at(-1).code,code);
  }
