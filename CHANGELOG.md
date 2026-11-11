@@ -1,5 +1,17 @@
 # Changelog
 
+## HQ automatic sales import — 2026-11-11
+
+- Add an isolated headless branch-to-HQ finalized-sales importer, with a durable
+  immutable queue, independent branch retry, fenced leases and atomic native
+  copy/journal/acknowledgement. Preserve original numbers and all eight native
+  sale/void rowsets; hold conflicting or partial copies instead of overwriting.
+- Use restricted view-only source and execute-only HQ identities, copied-SQL
+  integration tests and non-PIN preservation audits. Keep customers, Ada points,
+  existing member/receipt workers, AdaPos and Shopee outside its write scope.
+- Preserve original receipt ownership even when its customer profile has not
+  arrived in HQ; copy the bill and log the pending directory record separately.
+
 ## HQ receipt worker — 2026-11-11
 
 - Verify native SQL identity and execute-only rights independently per target
