@@ -79,6 +79,11 @@ all queued documents then had an HQ header. Existing-HQ records still awaiting
 read-only comparison are not missing bills. Older HQ/source differences are
 held without overwriting. Initial backlog priority postponed only owned pending
 jobs whose header already existed, to let missing bills finish first.
+After the missing backlog completed, 1,259 unprepared pending jobs for headers
+already present in HQ were explicitly held as SALES_PREEXISTING_PRESERVED in
+one marker-guarded, queue-only adoption transaction. They are not success/
+source-equality claims and their native data was untouched. This removes the
+one-time old-record comparison backlog from the delivery lane for new bills.
 
 Two original receipts were copied with their original codes while their customer
 profiles remain absent in HQ: S2611005001-0004512 / AR005-000061 and
