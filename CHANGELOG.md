@@ -14,6 +14,8 @@
   upgrade rolls back every owned object before the original worker resumes.
 - Bind only referenced parameters per SQL batch and normalize SQL Server's
   CREATE/ALTER spelling when verifying the full installed receiver body.
+- Keep observational status-file errors from terminating receipt lanes. Verify
+  installed receiver bodies before staging a worker-only maintenance change.
 
 ## HQ automatic sales import — 2026-11-11
 

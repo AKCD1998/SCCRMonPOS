@@ -69,7 +69,8 @@ async function run(action){
  }
  if(action==='stage-worker'){
   const commit=committed(),o=owner(),p=proof(),native=JSON.parse(fs.readFileSync(path.join(copy.RUNTIME,'native-upgrade.json'),'utf8'));
-  if(!/STATE\s*:\s*1\s+STOPPED/.test(sc('query'))||!native.ok||native.commit!==commit||native.results.some(r=>r.receiverHash!==p.receiverHash))throw Error('RECEIPT_TIME_UPGRADE_ORDER_REFUSED');
+  if(!/STATE\s*:\s*1\s+STOPPED/.test(sc('query'))||!native.ok||native.results.length!==5||native.results.some(r=>r.receiverHash!==p.receiverHash))throw Error('RECEIPT_TIME_UPGRADE_ORDER_REFUSED');
+  for(const b of branches){const n=inspect(b);if(n.meta.receiver_hash!==p.receiverHash||definition(n.definition)!==definition(receiverStatements(b,'AdaAcc',p.receiver)[2]))throw Error('RECEIPT_TIME_UPGRADE_ORDER_REFUSED');}
   const backup=path.join(remote,'runtime','canonical-time-backup-20261111');noLink(backup);fs.mkdirSync(backup,{recursive:true});
   const files=['worker.cjs','native-adapter.cjs','Invoke-ReceiptNative.ps1','README.md'];
   const hashes=[];for(const file of files){const dest=path.join(remote,file);noLink(dest);noLink(path.join(backup,file));if(!fs.existsSync(path.join(backup,file)))fs.copyFileSync(dest,path.join(backup,file));fs.copyFileSync(path.join(__dirname,file),dest);hashes.push({file,sha256:digest(fs.readFileSync(dest))});}

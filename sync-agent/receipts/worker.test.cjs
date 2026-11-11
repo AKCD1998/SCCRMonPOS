@@ -3,6 +3,15 @@ const test=require('node:test'),assert=require('node:assert/strict'),crypto=requ
 const {createWorker,TARGETS}=require('./worker.cjs');
 const targets=TARGETS.map(branch=>({branch}));
 const fixture=branch=>{const id=crypto.randomUUID();return {id,targetBranch:branch,leaseToken:crypto.randomUUID(),payloadHash:'a'.repeat(64),payload:{operationId:id,memberId:crypto.randomUUID()}};};
+
+test('a locked observational status file cannot terminate any delivery lane or lose its acknowledgement',async()=>{
+ const acks=[];let publishCalls=0;
+ const worker=createWorker({targets,api:async(a,b)=>a==='lease'?{job:fixture(b.targetBranch)}:(acks.push(b),{accepted:true}),
+  receive:async(t,j)=>({operationId:j.id}),onStatus:()=>{publishCalls++;throw Object.assign(Error('sharing violation'),{code:'EPERM'});}});
+ for(let round=0;round<2;round++)await Promise.all(targets.map(t=>worker.cycle(t)));
+ assert.equal(publishCalls,10);assert.equal(acks.length,10);assert(acks.every(a=>a.state==='succeeded'));
+ assert.doesNotThrow(()=>worker.requestStop());
+});
 test('a stalled native branch cannot block a different branch; work is acknowledged only after native proof',async()=>{
  const jobs=new Map(targets.map(t=>[t.branch,fixture(t.branch)])),acks=[];
  let release;const blocked=new Promise(r=>release=r);
