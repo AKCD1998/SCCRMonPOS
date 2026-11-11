@@ -1,0 +1,34 @@
+name: Receipt sync checks
+on:
+  push:
+    branches: [master]
+    paths: ['sync-agent/receipts/**', '.github/workflows/receipt-sync-ci.yml']
+  pull_request:
+    paths: ['sync-agent/receipts/**', '.github/workflows/receipt-sync-ci.yml']
+permissions:
+  contents: read
+jobs:
+  receipt-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test sync-agent/receipts/worker.test.cjs
+  receipt-host:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PowerShell syntax and compile isolated service host
+        shell: pwsh
+        run: |
+          Get-ChildItem sync-agent/receipts/*.ps1 | ForEach-Object {
+            $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$null,[ref]$errors) | Out-Null
+            if($errors){throw ($errors.Message -join ', ')}
+          }
+          $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          $source=(Resolve-Path 'sync-agent/receipts/ServiceHost.cs').Path
+          & $compiler /nologo /target:exe /r:System.ServiceProcess.dll /out:receipt-host-check.exe $source
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}

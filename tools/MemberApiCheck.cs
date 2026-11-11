@@ -68,6 +68,10 @@ internal static class MemberApiCheck
         Check(PointMetadata.Format(null,"not-a-number")=="-");
         var claim=Parse<LoyaltyClaimResponse>("ParseLoyaltyClaimResponse","{\"ok\":true,\"awardedPoints\":3,\"newPointsBalance\":51.5,\"balanceExact\":\"51.5000\",\"pointsSource\":\"ada\",\"pointsStatus\":\"recorded_by_ada\",\"pointsCredited\":false}");
         Check(claim.NewPointsBalance==51.5m && claim.UsesAdaPoints && claim.PointsCredited==false);
+        var stored=Parse<LoyaltyClaimResponse>("ParseLoyaltyClaimResponse","{\"ok\":true,\"historyFirst\":true,\"syncJobId\":\"fixture-job\",\"awardedPoints\":0,\"newPointsBalance\":null,\"pointsSource\":\"ada\",\"pointsStatus\":\"pending_ada\",\"pointsCredited\":false}");
+        Check(stored.HistoryFirst && stored.SyncJobId=="fixture-job" && !stored.NewPointsBalance.HasValue && stored.PointsCredited==false);
+        var capability=Parse<ReceiptClaimStatus>("ParseReceiptClaimStatus","{\"ok\":true,\"branchCode\":\"005\",\"receiptNo\":\"S-FIXTURE\",\"claimed\":false,\"historyFirstEnabled\":true}");
+        Check(capability.HistoryFirstEnabled && !capability.Claimed);
         var history=Parse<PurchaseHistoryResult>("ParsePurchaseHistory","{\"purchases\":[{\"receiptNo\":\"S-FIXTURE\",\"awardedPoints\":null,\"pointsAvailable\":false,\"pointsSource\":\"ada\",\"pointsStatus\":\"stale\",\"returns\":[{\"pointsReversed\":null}]}]}");
         Check(!history.Purchases[0].AwardedPoints.HasValue && !history.Purchases[0].PointsAvailable && !history.Purchases[0].Returns[0].PointsReversed.HasValue);
         var merge=typeof(ApiClient).Assembly.GetType("SCCRMonPOS.MemberClaimForm").GetMethod("MergeMemberDetail",BindingFlags.NonPublic|BindingFlags.Static);

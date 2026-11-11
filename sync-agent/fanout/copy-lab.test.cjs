@@ -10,6 +10,8 @@ test('invalid actions and copy-baseline modes fail before launching a credential
  assert.throws(()=>lab.run('Drop','005'),/COPY_ACTION_REFUSED/);
  assert.throws(()=>lab.create('005',{copy:true}),/COPY_BASELINE_MODE_REFUSED/);
  assert.throws(()=>lab.snapshot('005',{copy:'true'}),/COPY_BASELINE_MODE_REFUSED/);
+ assert.throws(()=>lab.snapshot('005',{receiptWorker:true}),/COPY_RECEIPT_WORKER_QUERY_ONLY/);
+ assert.throws(()=>lab.query('005','SELECT 1',{}, {receiptWorker:'untrusted'}),/COPY_RECEIPT_WORKER_QUERY_ONLY/);
 });
 test('malformed SQL query packets and parameter identifiers are rejected without an SQL connection',()=>{
  assert.throws(()=>lab.query('005',''),/COPY_QUERY_PACKET_REFUSED/);
