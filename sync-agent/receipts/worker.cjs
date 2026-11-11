@@ -6,8 +6,10 @@ function failureCode(e){const c=e?.code||e?.message;return /^RECEIPT_[A-Z_0-9]{2
 function createWorker({api,receive,probe=async()=>{},targets,onStatus=()=>{},stopping=()=>false,sleep=ms=>new Promise(r=>setTimeout(r,ms)),pollMs=2000}){
  if(!Array.isArray(targets)||targets.length!==5||new Set(targets.map(t=>t.branch)).size!==5||targets.some(t=>!TARGETS.includes(t.branch))||pollMs!==2000)throw Error('RECEIPT_WORKER_CONFIG_REFUSED');
  const state=new Map(),verified=new Set();let stop=false;
- const publish=()=>onStatus({scope:SCOPE,state:stop?'stopped':([...state.values()].some(t=>t.state==='retry'||t.state==='review')?'attention-required':'healthy'),
-  targets:TARGETS.map(branch=>({branch,...(state.get(branch)||{state:'waiting'})}))});
+ // The status file is observational. A sharing violation while a monitor is
+ // reading it must not terminate a delivery lane or the worker Promise.all.
+ const publish=()=>{try{onStatus({scope:SCOPE,state:stop?'stopped':([...state.values()].some(t=>t.state==='retry'||t.state==='review')?'attention-required':'healthy'),
+  targets:TARGETS.map(branch=>({branch,...(state.get(branch)||{state:'waiting'})}))});}catch{}};
  async function cycle(target){
   let job;
   try{
