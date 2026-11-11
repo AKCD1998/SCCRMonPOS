@@ -23,4 +23,17 @@ function receive(target,credentials,job,{mode='Live',timeout=20000,rollbackCopy=
   });child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({scope:'SCCRM-NATIVE-RECEIPT-V1',target,credentials,job}));
  });
 }
-module.exports={receive,REVIEW};
+function verifyRights(target,credentials){
+ return new Promise((resolve,reject)=>{
+  const child=spawn('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-NonInteractive','-File',path.join(__dirname,'Read-ReceiverRights.ps1')],
+   {windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});
+  let output='',settled=false;
+  const finish=(error,value)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve(value);};
+  const timer=setTimeout(()=>{child.kill();finish(Error('RECEIPT_SOURCE_UNAVAILABLE'));},12000);
+  child.stdout.on('data',chunk=>{output+=chunk.toString('utf8');if(output.length>65536){child.kill();finish(Error('RECEIPT_RIGHTS_VERIFY_FAILED'));}});
+  child.stderr.on('data',()=>{});child.on('error',()=>finish(Error('RECEIPT_SOURCE_UNAVAILABLE')));
+  child.on('close',code=>{try{const r=JSON.parse(output.trim().replace(/^\uFEFF/,''));if(code!==0||!r.ok||r.branch!==target.branch||r.worker!==credentials.user||r.customer_update!==0||r.receiver_execute!==1)throw Error('RECEIPT_SOURCE_UNAVAILABLE');finish(null,{ok:true});}catch{finish(Error('RECEIPT_SOURCE_UNAVAILABLE'));}});
+  child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({branch:target.branch,credentials}));
+ });
+}
+module.exports={receive,verifyRights,REVIEW};

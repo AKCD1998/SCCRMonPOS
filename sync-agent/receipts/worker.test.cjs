@@ -28,3 +28,14 @@ test('cross-target work is rejected before SQL; restarting the worker does not r
  await createWorker(dependency).cycle(targets.find(t=>t.branch==='001'));assert.equal(nativeCalls,0);
  assert.equal(job.targetBranch,'005');
 });
+test('native connection proof is per target, cached only after success and cannot block another target',async()=>{
+ const reads=[],leases=[],statuses=[];let release;
+ const delayed=new Promise(r=>release=r);
+ const worker=createWorker({targets,probe:async t=>{reads.push(t.branch);if(t.branch==='005')await delayed;},
+  api:async(a,b)=>{leases.push(b.targetBranch);return {job:null};},receive:async()=>{},onStatus:s=>statuses.push(s)});
+ const slow=worker.cycle(targets.find(t=>t.branch==='005'));
+ await worker.cycle(targets.find(t=>t.branch==='001'));await worker.cycle(targets.find(t=>t.branch==='001'));
+ assert.deepEqual(leases,['001','001']);assert.equal(reads.filter(b=>b==='001').length,1);
+ assert(statuses.at(-1).targets.find(t=>t.branch==='001').sqlVerified);
+ release();await slow;assert.equal(leases.at(-1),'005');
+});

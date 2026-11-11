@@ -3,23 +3,24 @@ const {REVIEW}=require('./native-adapter.cjs');
 const TARGETS=['000','001','003','004','005'];
 const SCOPE='SCCRM-HQ-RECEIPT-SYNC-V1';
 function failureCode(e){const c=e?.code||e?.message;return /^RECEIPT_[A-Z_0-9]{2,70}$/.test(c||'')?c:'RECEIPT_SOURCE_UNAVAILABLE';}
-function createWorker({api,receive,targets,onStatus=()=>{},stopping=()=>false,sleep=ms=>new Promise(r=>setTimeout(r,ms)),pollMs=2000}){
+function createWorker({api,receive,probe=async()=>{},targets,onStatus=()=>{},stopping=()=>false,sleep=ms=>new Promise(r=>setTimeout(r,ms)),pollMs=2000}){
  if(!Array.isArray(targets)||targets.length!==5||new Set(targets.map(t=>t.branch)).size!==5||targets.some(t=>!TARGETS.includes(t.branch))||pollMs!==2000)throw Error('RECEIPT_WORKER_CONFIG_REFUSED');
- const state=new Map();let stop=false;
+ const state=new Map(),verified=new Set();let stop=false;
  const publish=()=>onStatus({scope:SCOPE,state:stop?'stopped':([...state.values()].some(t=>t.state==='retry'||t.state==='review')?'attention-required':'healthy'),
   targets:TARGETS.map(branch=>({branch,...(state.get(branch)||{state:'waiting'})}))});
  async function cycle(target){
   let job;
   try{
+   if(!verified.has(target.branch)){await probe(target);verified.add(target.branch);}
    const data=await api('lease',{targetBranch:target.branch});job=data.job;
-   if(!job){state.set(target.branch,{state:'healthy',at:new Date().toISOString()});publish();return;}
+   if(!job){state.set(target.branch,{state:'healthy',sqlVerified:true,at:new Date().toISOString()});publish();return;}
    if(job.targetBranch!==target.branch||job.payload?.operationId!==job.id)throw Error('RECEIPT_ACK_IDENTITY_REFUSED');
    let outcome;
    try{outcome={state:'succeeded',code:'ADA_RECEIPT_VERIFIED',proof:await receive(target,job)};}
    catch(error){const code=failureCode(error);outcome={state:REVIEW.test(code)?'review':'retry',code};}
    const ack=await api('acknowledge',{id:job.id,targetBranch:target.branch,leaseToken:job.leaseToken,payloadHash:job.payloadHash,...outcome});
    if(ack.accepted!==true)throw Error('RECEIPT_ACK_EXPIRED_RETRY');
-   state.set(target.branch,{state:outcome.state,code:outcome.code,jobId:job.id,at:new Date().toISOString()});publish();
+   state.set(target.branch,{state:outcome.state,sqlVerified:true,code:outcome.code,jobId:job.id,at:new Date().toISOString()});publish();
   }catch(error){state.set(target.branch,{state:'retry',code:failureCode(error),...(job?{jobId:job.id}:{}),at:new Date().toISOString()});publish();}
  }
  async function lane(target){while(!stop&&!stopping()){await cycle(target);for(let i=0;i<pollMs&&!stop&&!stopping();i+=250)await sleep(250);}}

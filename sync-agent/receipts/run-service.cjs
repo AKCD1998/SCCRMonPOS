@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {createWorker,httpApi,SCOPE}=require('./worker.cjs');
-const {receive}=require('./native-adapter.cjs');
+const {receive,verifyRights}=require('./native-adapter.cjs');
 const {machineSecrets}=require('./secrets.cjs');
 const ROOT=__dirname;
 function publish(status){const file=path.join(ROOT,'status','service.json');fs.writeFileSync(file+'.tmp',JSON.stringify({...status,at:new Date().toISOString()}));fs.renameSync(file+'.tmp',file);}
@@ -15,6 +15,7 @@ async function main(){
  const targets=config.targets;
  for(const t of targets){const c=secrets.credentials?.[t.branch];if(c?.user!=='sccrm_receipt_sync_'+t.branch||!c.password)throw Error('RECEIPT_WORKER_CREDENTIAL_REQUIRED');}
  const worker=createWorker({api:httpApi({token:secrets.apiToken}),targets,
+  probe:target=>verifyRights(target,secrets.credentials[target.branch]),
   receive:(target,job)=>receive(target,secrets.credentials[target.branch],job),onStatus:publish,
   stopping:()=>fs.existsSync(path.join(ROOT,'runtime','stop.request'))||fs.existsSync(path.join(ROOT,'runtime','pause.request'))});
  process.on('SIGTERM',()=>worker.requestStop());process.on('SIGINT',()=>worker.requestStop());

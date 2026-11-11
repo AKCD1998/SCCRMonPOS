@@ -1,5 +1,11 @@
 # Changelog
 
+## HQ receipt worker — 2026-11-11
+
+- Verify native SQL identity and execute-only rights independently per target
+  before reporting it healthy. Cache successful probes for this worker run;
+  offline targets keep retrying without blocking other branches.
+
 ## 1.3.23 — 2026-11-11
 
 - Save membership receipt history in SCCRM without waiting for Ada member or
