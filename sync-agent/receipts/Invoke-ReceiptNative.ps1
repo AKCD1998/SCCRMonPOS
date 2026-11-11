@@ -29,6 +29,10 @@ try{
  $builder=New-Object Data.SqlClient.SqlConnectionStringBuilder;$builder['Data Source']=$t.server;$builder['Initial Catalog']=$t.database
  $builder['User ID']=$p.credentials.user;$builder['Password']=$p.credentials.password;$builder['Connect Timeout']=5;$builder['Pooling']=$false;$builder['Application Name']='SCCRM-ReceiptSync-'+$Mode
  $stage='connect';$db=New-Object Data.SqlClient.SqlConnection $builder.ConnectionString;$db.Open();$builder['Password']='';$p.credentials.password=''
+ # Ada sale tables can have indexed computed columns / filtered indexes. These
+ # options belong to this worker connection only; never change database defaults.
+ $q=$db.CreateCommand();$q.CommandTimeout=5;$q.CommandText='SET ANSI_NULLS ON;SET ANSI_PADDING ON;SET ANSI_WARNINGS ON;SET ARITHABORT ON;SET CONCAT_NULL_YIELDS_NULL ON;SET QUOTED_IDENTIFIER ON;SET NUMERIC_ROUNDABORT OFF;'
+ $null=$q.ExecuteNonQuery();$q.Dispose();$q=$null
  $q=$db.CreateCommand();$q.CommandTimeout=5;$q.CommandText="SELECT CONVERT(varchar(128),SERVERPROPERTY('MachineName')) machine,DB_NAME() database_name,ORIGINAL_LOGIN() actor,IS_SRVROLEMEMBER('sysadmin') elevated,IS_MEMBER('db_owner') db_owner,IS_MEMBER('db_datawriter') writer"
  $r=$q.ExecuteReader();if(!$r.Read() -or $r['machine'] -cne $t.machine -or $r['database_name'] -cne $t.database){throw 'RECEIPT_DATABASE_REFUSED'}
  if($Mode -ceq 'Live' -and ($r['actor'] -cne ('sccrm_receipt_sync_'+$branch) -or $r['elevated'] -ne 0 -or $r['db_owner'] -ne 0 -or $r['writer'] -ne 0)){throw 'RECEIPT_WORKER_RIGHTS_EXCESSIVE'}
@@ -49,5 +53,6 @@ try{
  @{ok=$true;result=$ack}|ConvertTo-Json -Compress -Depth 5
 }catch{
  $e=$_.Exception.GetBaseException();$message=$e.Message;$code=if($message -cmatch '^RECEIPT_[A-Z_0-9]+$'){$message}elseif($e -is [Data.SqlClient.SqlException] -and $e.Number -in @(-2,53,64,121,233,258,1205,1222,10053,10054,10060)){'RECEIPT_SOURCE_RETRY'}else{'RECEIPT_SOURCE_UNAVAILABLE'}
- @{ok=$false;code=$code;stage=$stage;detailsWithheld=$true}|ConvertTo-Json -Compress;exit 1
+ $requiredSetOptions=@('ANSI_NULLS','ANSI_PADDING','ANSI_WARNINGS','ARITHABORT','CONCAT_NULL_YIELDS_NULL','QUOTED_IDENTIFIER','NUMERIC_ROUNDABORT')|Where-Object{$message.Contains($_)}
+ @{ok=$false;code=$code;stage=$stage;sqlNumber=$(if($e -is [Data.SqlClient.SqlException]){$e.Number}else{$null});requiredSetOptions=@($requiredSetOptions);errorType=$e.GetType().Name;detailsWithheld=$true}|ConvertTo-Json -Compress;exit 1
 }finally{if($r){$r.Dispose()};if($q){$q.Dispose()};if($copyTx){try{$copyTx.Rollback()}catch{};$copyTx.Dispose()};if($db){$db.Dispose()};if($builder){$builder['Password']=''};if($p){$p.credentials.password=''}}

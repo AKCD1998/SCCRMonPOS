@@ -10,7 +10,7 @@ try{
  $endpoint=if($b -ceq '000'){'tcp:100.90.166.72,49800'}else{$peers[$b][0]+'\SQLEXPRESS'}
  $builder=New-Object Data.SqlClient.SqlConnectionStringBuilder;$builder['Data Source']=$endpoint;$builder['Initial Catalog']='AdaAcc';$builder['User ID']=$p.admin.user;$builder['Password']=$p.admin.password;$builder['Connect Timeout']=5;$builder['Pooling']=$false;$builder['Application Name']='SCCRM-Receipt-Receiver-Provision'
  $stage='connect';$db=New-Object Data.SqlClient.SqlConnection $builder.ConnectionString;$db.Open();$builder['Password']='';$p.admin.password=''
- Run 'SET DEADLOCK_PRIORITY LOW;SET LOCK_TIMEOUT 1000;'
+ Run 'SET DEADLOCK_PRIORITY LOW;SET LOCK_TIMEOUT 1000;SET ANSI_NULLS ON;SET ANSI_PADDING ON;SET ANSI_WARNINGS ON;SET ARITHABORT ON;SET CONCAT_NULL_YIELDS_NULL ON;SET QUOTED_IDENTIFIER ON;SET NUMERIC_ROUNDABORT OFF;'
  $identity=Rows "SELECT CONVERT(varchar(128),SERVERPROPERTY('MachineName')) machine,DB_NAME() db,IS_SRVROLEMEMBER('sysadmin') elevated"
  if($identity.Count -ne 1 -or $identity[0].machine -cne $peers[$b][1] -or $identity[0].db -cne 'AdaAcc' -or $identity[0].elevated -ne 1){throw 'RECEIPT_PROVISION_TARGET_REFUSED'}
  $stage='schema';$headers=Rows "SELECT name FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND(name IN('TPSTSalHD','TSHD001','TSHD002')) ORDER BY name"

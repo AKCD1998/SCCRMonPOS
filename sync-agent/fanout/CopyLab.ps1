@@ -82,7 +82,9 @@ function Open-Database([string]$endpoint,[string]$database,[hashtable]$credentia
  $conn=New-Object Data.SqlClient.SqlConnection $builder.ConnectionString
  try{
   $conn.Open();$builder['Password']=''
-  $cmd=$conn.CreateCommand();$cmd.CommandTimeout=5;$cmd.CommandText='SET LOCK_TIMEOUT 1000; SET DEADLOCK_PRIORITY LOW;';$null=$cmd.ExecuteNonQuery();$cmd.Dispose()
+  $sessionSql='SET LOCK_TIMEOUT 1000; SET DEADLOCK_PRIORITY LOW;'
+  if($copyOnly){$sessionSql+='SET ANSI_NULLS ON;SET ANSI_PADDING ON;SET ANSI_WARNINGS ON;SET ARITHABORT ON;SET CONCAT_NULL_YIELDS_NULL ON;SET QUOTED_IDENTIFIER ON;SET NUMERIC_ROUNDABORT OFF;'}
+  $cmd=$conn.CreateCommand();$cmd.CommandTimeout=5;$cmd.CommandText=$sessionSql;$null=$cmd.ExecuteNonQuery();$cmd.Dispose()
   return $conn
  }catch{$conn.Dispose();throw}finally{$builder['Password']=''}
 }
