@@ -80,6 +80,7 @@ namespace SCCRMonPOS
 
     public class ReceiptClaimStatus
     {
+        public bool HistoryFirstEnabled { get; set; }
         public bool Claimed { get; set; }
         public string BranchCode { get; set; }
         public string ReceiptNo { get; set; }
@@ -122,6 +123,8 @@ namespace SCCRMonPOS
 
     public class LoyaltyClaimResponse : PointMetadata
     {
+        public bool HistoryFirst { get; set; }
+        public string SyncJobId { get; set; }
         public bool   Ok              { get; set; }
         public string ClaimId         { get; set; }
         public string ReceiptNo       { get; set; }
@@ -536,6 +539,31 @@ namespace SCCRMonPOS
             return ParseLoyaltyClaimResponse(json);
         }
 
+        public async Task<SyncJobList> GetSyncJobsAsync(string memberId = null)
+        {
+            RequireValidToken();
+            var result = Deserialize<SyncJobList>(await GetJsonAsync("/api/loyalty/sync-jobs" +
+                (string.IsNullOrWhiteSpace(memberId) ? "" : "?memberId=" + Uri.EscapeDataString(memberId)), _staffToken));
+            if (result == null || !result.Ok || result.Jobs == null) throw new ApiException("ยังอ่านสถานะการส่งข้อมูลไม่ได้");
+            return result;
+        }
+
+        public async Task<SyncJobDetail> GetSyncJobAsync(string jobId)
+        {
+            RequireValidToken();
+            var result = Deserialize<SyncJobDetail>(await GetJsonAsync("/api/loyalty/sync-jobs/" + Uri.EscapeDataString(jobId), _staffToken));
+            if (result == null || !result.Ok || result.Job == null || result.Job.Id != jobId || result.Events == null)
+                throw new ApiException("ยังอ่านประวัติการส่งข้อมูลไม่ได้");
+            return result;
+        }
+
+        public async Task RetrySyncJobAsync(string jobId)
+        {
+            RequireValidToken();
+            var result = Deserialize<SyncJobList>(await PostJsonAsync("/api/loyalty/sync-jobs/" + Uri.EscapeDataString(jobId) + "/retry", "{}", _staffToken));
+            if (result == null || !result.Ok) throw new ApiException("ยังรับคำขอลองใหม่ไม่ได้");
+        }
+
         public async Task RegisterSaleEventAsync(PosReceipt receipt, string internalToken)
         {
             if (receipt == null)
@@ -588,6 +616,7 @@ namespace SCCRMonPOS
 
         [DataContract] private sealed class ReceiptClaimStatusDto
         {
+            [DataMember(Name = "historyFirstEnabled")] public bool HistoryFirstEnabled { get; set; }
             [DataMember(Name = "ok")] public bool? Ok { get; set; }
             [DataMember(Name = "claimed")] public bool? Claimed { get; set; }
             [DataMember(Name = "branchCode")] public string BranchCode { get; set; }
@@ -598,6 +627,8 @@ namespace SCCRMonPOS
 
         [DataContract] private sealed class LoyaltyClaimResponseDto : PointMetadata
         {
+            [DataMember(Name = "historyFirst")] public bool HistoryFirst { get; set; }
+            [DataMember(Name = "syncJobId")] public string SyncJobId { get; set; }
             [DataMember(Name = "ok")]               public bool   Ok               { get; set; }
             [DataMember(Name = "claimId")]          public string ClaimId          { get; set; }
             [DataMember(Name = "receiptNo")]        public string ReceiptNo        { get; set; }
@@ -1107,6 +1138,7 @@ namespace SCCRMonPOS
                 (dto.Claimed.Value && (string.IsNullOrWhiteSpace(dto.ClaimId) || string.IsNullOrWhiteSpace(dto.Member?.Id))))
                 throw new ApiException("Invalid receipt status response.");
             return new ReceiptClaimStatus {
+                HistoryFirstEnabled = dto.HistoryFirstEnabled,
                 Claimed = dto.Claimed.Value, BranchCode = dto.BranchCode, ReceiptNo = dto.ReceiptNo,
                 ClaimId = dto.ClaimId, MemberId = dto.Member?.Id, MemberName = dto.Member?.DisplayName,
                 MemberCode = dto.Member?.MemberCode
@@ -1119,6 +1151,7 @@ namespace SCCRMonPOS
             if (dto == null) throw new ApiException("เซิร์ฟเวอร์ไม่ส่งผลลัพธ์การสะสมแต้มกลับมา");
             return new LoyaltyClaimResponse
             {
+                HistoryFirst = dto.HistoryFirst, SyncJobId = dto.SyncJobId,
                 Ok               = dto.Ok,
                 ClaimId          = dto.ClaimId,
                 ReceiptNo        = dto.ReceiptNo,

@@ -55,6 +55,7 @@ internal static class DesktopFeatureCheck
                 RegistrationOrigins();
                 MemberSelection();
                 MemberReadyRefresh();
+                HistoryFirstClaimGuards();
                 RegistrationPhones();
                 RegistrationChoices();
                 MemberEditing();
@@ -383,6 +384,34 @@ internal static class DesktopFeatureCheck
                 form.Dispose();delayed.SetResult(ready());
                 Check(!PumpMemberRefresh(pending));
             }
+        }
+    }
+
+    private static void HistoryFirstClaimGuards()
+    {
+        stage="history-first-saves-without-an-ada-balance";
+        using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope("005","002")))
+        using(var display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-history-first-check")))
+        using(var form=PendingMemberForm(watcher,display))
+        {
+            Check(!CanClaim(form));
+            var status=EditField<ReceiptClaimStatus>(form,"_receiptClaimStatus");
+            status.HistoryFirstEnabled=true;
+            Check(CanClaim(form));
+            Check(EditField<MemberSearchResult>(form,"_selectedMember").CurrentPoints==null);
+            Check(!EditField<bool>(form,"_claimCompleted"));
+            status.Claimed=true;Check(!CanClaim(form));status.Claimed=false;
+            SetClaimField(form,"_receiptStatusVerified",false);Check(!CanClaim(form));
+            SetClaimField(form,"_receiptStatusVerified",true);
+            SetClaimField(form,"_receiptStatusChecking",true);Check(!CanClaim(form));
+            SetClaimField(form,"_receiptStatusChecking",false);
+            SetClaimField(form,"_uiBusy",true);Check(!CanClaim(form));SetClaimField(form,"_uiBusy",false);
+            var receipt=EditField<SCCRMonPOS.Models.PosReceipt>(form,"_receipt");
+            receipt.PosCode="001";Check(!CanClaim(form));receipt.PosCode="002";
+            receipt.GrandTotal=0;Check(!CanClaim(form));receipt.GrandTotal=100;
+            receipt.DocType="9";Check(!CanClaim(form));receipt.DocType="1";
+            SetClaimField(form,"_receiptClaimStatus",null);Check(!CanClaim(form));
+            SetClaimField(form,"_receiptClaimStatus",status);Check(CanClaim(form));
         }
     }
 

@@ -208,6 +208,11 @@ namespace SCCRMonPOS
         private void BuildExtraMenu()
         {
             _extraMenu = new ContextMenuStrip();
+            _extraMenu.Items.Add("สถานะส่งข้อมูลไป Ada / ลองใหม่", null, (s, e) =>
+            {
+                using (var form = new SyncStatusForm(_api, _selectedMember?.Id)) form.ShowDialog(this);
+            });
+            _extraMenu.Items.Add(new ToolStripSeparator());
             AddComingSoonMenuItem("จัดการสินค้า");
             AddComingSoonMenuItem("จัดการหมวดสินค้า");
             _extraMenu.Items.Add("โปรโมชั่นสะสมแต้มส่วนกลาง", null, (s, e) => CentralPromotions.OpenPortal(_receipt?.BranchCode));
@@ -528,7 +533,9 @@ namespace SCCRMonPOS
             _lblMemberName.Text = member.DisplayName + (string.IsNullOrWhiteSpace(member.Phone) ? "" : " | " + member.Phone);
             if (!member.PointsAvailable)
             {
-                _lblMemberPoints.Text = "แต้มปัจจุบัน: - (รอข้อมูล ระบบจะตรวจให้อัตโนมัติ)";
+                _lblMemberPoints.Text = _receiptClaimStatus?.HistoryFirstEnabled == true
+                    ? "แต้มปัจจุบัน: - (รอ Ada · บันทึกประวัติได้)"
+                    : "แต้มปัจจุบัน: - (รอข้อมูล ระบบจะตรวจให้อัตโนมัติ)";
                 _pnlMemberSummary.Visible = true;
                 _btnEditMember.Visible = true;
                 return;
@@ -816,7 +823,8 @@ namespace SCCRMonPOS
             _promotionTimer?.Stop();
             _memberReadyTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
-            _lblStatus.Text = response.UsesAdaPoints
+            _lblStatus.Text = response.HistoryFirst ? "บันทึกประวัติใน SCCRM แล้ว · ระบบจะตรวจการส่ง Ada ต่อเอง ดูได้ที่เมนูเพิ่มเติม"
+                : response.UsesAdaPoints
                 ? "บันทึกประวัติบิลแล้ว · " + (response.PointsStatus=="not_recorded_by_ada" ? "Ada ยังไม่มีรายการแต้มของบิลนี้" : "แต้มที่ Ada บันทึก " + PointMetadata.Format(response.AwardedPoints,response.AwardedPointsExact)) +
                   " | แต้มปัจจุบัน " + PointMetadata.Format(response.NewPointsBalance,response.BalanceExact)
                 : "บันทึกบิลสำเร็จ ได้รับ " + response.AwardedPoints.ToString(CultureInfo.InvariantCulture) + " แต้ม | ยอดรวม " + PointMetadata.Format(response.NewPointsBalance) + " แต้ม";
@@ -861,7 +869,7 @@ namespace SCCRMonPOS
                 _watcher != null && _watcher.OwnsReceipt(_receipt) &&
                 !string.IsNullOrWhiteSpace(_receipt.DocNo) && !string.IsNullOrWhiteSpace(_receipt.BranchCode) &&
                 _receipt.GrandTotal > 0m && _receipt.Items != null && _receipt.Items.Count > 0 &&
-                _selectedMember != null && _selectedMember.PointsAvailable;
+                _selectedMember != null && (_receiptClaimStatus.HistoryFirstEnabled || _selectedMember.PointsAvailable);
         }
 
         private void RefreshEmptyStates()

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.23 — 2026-11-11
+
+- Save membership receipt history in SCCRM without waiting for Ada member or
+  points readiness when the server enables the history-first capability.
+- Show branch-scoped sync status, timestamped events and explicit retry under
+  the extra menu. Keep receipt ownership, terminal scope and duplicate guards.
+- Add an independent headless HQ receipt queue/receiver. Fill only a blank
+  member code on an existing, paid, matching bill; never create sales or award
+  points. Keep the existing two-second member lane unchanged.
+- Verify copied native HQ/four-branch bills, narrow receiver permissions,
+  repeated delivery, rejected ownership/item changes and unchanged customers.
+
 ## 1.3.22 — 2026-11-11
 
 - Retry the selected member's unavailable points by the same UUID every five

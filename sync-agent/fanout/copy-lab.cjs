@@ -7,15 +7,17 @@ const PREFIX='SCCRM_FanoutCopy_20261029_';
 const POWERSHELL='C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
 function branchCode(branch){if(typeof branch!=='string'||!BRANCHES.includes(branch))throw Error('COPY_BRANCH_REFUSED');return branch;}
 function databaseFor(branch){return PREFIX+branchCode(branch);}
-function run(action,branch,{sql,parameters={},runtimeDirectory,baselineTag='initial',timeoutMs=120000,copy=false}={}){
+function run(action,branch,{sql,parameters={},runtimeDirectory,baselineTag='initial',timeoutMs=120000,copy=false,receiptWorker=false}={}){
  branchCode(branch);
  if(!['Snapshot','Create','Verify','Query'].includes(action))throw Error('COPY_ACTION_REFUSED');
  if(typeof copy!=='boolean'||copy&&!['Snapshot','Verify'].includes(action))throw Error('COPY_BASELINE_MODE_REFUSED');
+ if(typeof receiptWorker!=='boolean'||receiptWorker&&action!=='Query')throw Error('COPY_RECEIPT_WORKER_QUERY_ONLY');
  if(typeof baselineTag!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/.test(baselineTag))throw Error('COPY_BASELINE_TAG_REFUSED');
  if(action==='Query'&&(typeof sql!=='string'||!sql.trim()||sql.length>1048576))throw Error('COPY_QUERY_PACKET_REFUSED');
  if(!parameters||typeof parameters!=='object'||Array.isArray(parameters)||Object.keys(parameters).some(k=>!/^[A-Za-z][A-Za-z0-9_]*$/.test(k)))throw Error('COPY_PARAMETER_REFUSED');
  const args=['-NoProfile','-NonInteractive','-File',path.join(__dirname,'CopyLab.ps1'),'-Action',action,'-Branch',branch,'-BaselineTag',baselineTag];
  if(copy)args.push('-TargetCopy');
+ if(receiptWorker)args.push('-ReceiptWorker');
  if(runtimeDirectory)args.push('-RuntimeDirectory',path.resolve(runtimeDirectory));
  return new Promise((resolve,reject)=>{
   const child=spawn(POWERSHELL,args,{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});

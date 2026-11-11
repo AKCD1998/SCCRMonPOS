@@ -3,6 +3,7 @@ param(
  [Parameter(Mandatory=$true)][ValidateSet('Snapshot','Create','Verify','Query')][string]$Action,
  [Parameter(Mandatory=$true)][ValidateSet('000','001','003','004','005')][string]$Branch,
  [switch]$TargetCopy,
+ [switch]$ReceiptWorker,
  [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$')][string]$BaselineTag='initial',
  [string]$RuntimeDirectory
 )
@@ -205,6 +206,7 @@ function Bulk-Copy([Data.SqlClient.SqlConnection]$conn,[Data.DataTable]$data,[st
 try{
  if(!$RUNTIME.StartsWith($PRIVATE_ROOT+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){Refuse 'COPY_RUNTIME_PATH_REFUSED'}
  if($TargetCopy -and $Action -cnotin @('Snapshot','Verify')){Refuse 'COPY_BASELINE_MODE_REFUSED'}
+ if($ReceiptWorker -and $Action -cne 'Query'){Refuse 'COPY_RECEIPT_WORKER_QUERY_ONLY'}
  $database=$COPY_PREFIX+$Branch
  $stage='hq-credential-source';$hqCredentials=Read-HqCredentials
  if($Action -ceq 'Query'){
@@ -213,7 +215,8 @@ try{
   # NO REVERT locks this session in a database-only user; even dynamic SQL cannot
   # restore the admin login. TRUSTWORTHY and DB_CHAINING remain off on every copy.
   $stage='copy-query-connect';$targetDb=Open-Database $HQ_SERVER $database $hqCredentials $true;Copy-Guard $targetDb $database
-  $null=Scalar $targetDb "EXECUTE AS USER='SCCRM_FanoutCopyExecutor' WITH NO REVERT;"
+  $executor=if($ReceiptWorker){'SCCRM_ReceiptCopyWorker'}else{'SCCRM_FanoutCopyExecutor'}
+  $null=Scalar $targetDb ("EXECUTE AS USER='"+$executor+"' WITH NO REVERT;")
   if((Scalar $targetDb 'SELECT DB_NAME()') -cne $database){Refuse 'COPY_QUERY_TARGET_REFUSED'}
   $parameters=@{};if($packet.parameters){foreach($entry in $packet.parameters.PSObject.Properties){$parameters[$entry.Name]=$entry.Value}}
   $stage='copy-query-execute';$set=Tables $targetDb $packet.sql $parameters;$results=@()
