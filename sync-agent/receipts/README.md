@@ -24,6 +24,9 @@ lane or requires AdaFront/AdaSmart to remain open.
   A failed branch does not block another. HQ's existing copy is linked separately
   when it arrives; no replacement or invented bill is inserted.
 - Backdated linking does not retroactively calculate or award Ada points.
+- The receipt connection explicitly enables the SET options required by Ada's
+  indexed sale tables, including ARITHABORT. These settings affect only this
+  worker connection; database defaults and AdaPos connections are untouched.
 
 ## Inspection and stop
 

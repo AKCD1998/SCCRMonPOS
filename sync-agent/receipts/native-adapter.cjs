@@ -14,7 +14,7 @@ function receive(target,credentials,job,{mode='Live',timeout=20000,rollbackCopy=
   child.on('close',code=>{
    try{
     const data=JSON.parse(output.trim().replace(/^\uFEFF/,''));
-    if(code!==0||!data.ok){const value=/^RECEIPT_[A-Z_0-9]{2,70}$/.test(data.code||'')?data.code:'RECEIPT_SOURCE_UNAVAILABLE';throw Object.assign(Error(value),{code:value,stage:data.stage});}
+    if(code!==0||!data.ok){const value=/^RECEIPT_[A-Z_0-9]{2,70}$/.test(data.code||'')?data.code:'RECEIPT_SOURCE_UNAVAILABLE';throw Object.assign(Error(value),{code:value,stage:data.stage,sqlNumber:data.sqlNumber,requiredSetOptions:data.requiredSetOptions,errorType:data.errorType});}
     const a=data.result,p=job.payload;
     if(a.operation_id!==job.id||a.payload_hash!==job.payloadHash||a.ada_code!==p.adaCode||a.doc_no!==p.receiptNo||a.branch_code!==p.branchCode||a.pos_code!==p.posCode||a.target_branch!==job.targetBranch)throw Error('RECEIPT_ACK_IDENTITY_REFUSED');
     done(null,{operationId:a.operation_id,payloadHash:a.payload_hash,adaCode:a.ada_code,receiptNo:a.doc_no,branchCode:a.branch_code,posCode:a.pos_code,
