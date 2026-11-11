@@ -5,6 +5,7 @@ const copy=require('./time-copy.cjs');
 const branches=['000','001','003','004','005'],service='SCCRMHQReceiptSync';
 const remote='\\\\100.90.166.72\\D\\SCCRM-HQ-LiveSync-20261024\\receipts';
 const digest=v=>crypto.createHash('sha256').update(v).digest('hex');
+const definition=v=>v.replace(/^(?:CREATE|ALTER) PROCEDURE/,'CREATE PROCEDURE').replace(/\r\n/g,'\n').trim();
 function sc(action){if(!['query','stop','start'].includes(action))throw Error('RECEIPT_TIME_SERVICE_ACTION_REFUSED');const r=spawnSync('C:/Windows/System32/sc.exe',['\\\\100.90.166.72',action,service],{windowsHide:true,encoding:'utf8',timeout:15000});if(r.status!==0)throw Error('RECEIPT_TIME_SERVICE_CONTROL_FAILED');return r.stdout;}
 function owner(){const o=JSON.parse(fs.readFileSync(path.join(remote,'.receipt-service-owner.json'),'utf8'));if(o.marker!=='a7dc1e0f-91d3-431c-bd97-fb142c5ae082'||o.service!==service||o.root!=='D:\\SCCRM-HQ-LiveSync-20261024\\receipts')throw Error('RECEIPT_TIME_SERVICE_OWNER_REFUSED');return o;}
 function noLink(file){if(fs.existsSync(file)&&fs.lstatSync(file).isSymbolicLink())throw Error('RECEIPT_TIME_REPARSE_REFUSED');}
@@ -15,6 +16,8 @@ function proof(){
  const receiver=fs.readFileSync(path.join(__dirname,'native-receiver.sql'),'utf8');return {native,real,receiverHash:digest(receiver),receiver};
 }
 function committed(){const repo=path.resolve(__dirname,'../..'),r=spawnSync('git',['-C',repo,'status','--porcelain','--untracked-files=all'],{encoding:'utf8'});if(r.status!==0||r.stdout.trim())throw Error('RECEIPT_TIME_COMMITTED_SOURCE_REQUIRED');const s=spawnSync('git',['-C',repo,'rev-parse','HEAD'],{encoding:'utf8'});if(s.status!==0||!/[a-f0-9]{40}/.test(s.stdout.trim()))throw Error('RECEIPT_TIME_COMMITTED_SOURCE_REQUIRED');return s.stdout.trim();}
+function receiverStatements(b,database,receiver){return ['SET XACT_ABORT ON;',"IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL BEGIN "+fs.readFileSync(path.join(__dirname,'native-time-audit.sql'),'utf8')+' END;',receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__',database).replaceAll('__TARGET__',b),
+ `DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptTimeAudit TO [sccrm_receipt_sync_${b}];UPDATE dbo.SCCRM_ReceiptSyncMeta SET receiver_hash=@hash WHERE singleton=1;`];}
 function inspect(b){
  const r=copy.sql(copy.target(b),`SELECT CONVERT(varchar(36),marker) marker,target_branch,worker_login,receiver_hash FROM dbo.SCCRM_ReceiptSyncMeta;
  SELECT definition FROM sys.sql_modules WHERE object_id=OBJECT_ID('dbo.SCCRM_AttachReceiptMember');
@@ -35,6 +38,16 @@ function receipts(){
 async function run(action){
  owner();
  noLink(remote);noLink(path.join(remote,'runtime'));
+ if(action==='verify-copy-upgrade'){
+  const b='005',t=copy.target('000',copy.databaseFor(b)),p=proof(),assert=require('node:assert/strict');
+  copy.sql(t,"IF COL_LENGTH('dbo.SCCRM_ReceiptSyncMeta','receiver_hash') IS NULL ALTER TABLE dbo.SCCRM_ReceiptSyncMeta ADD receiver_hash char(64) NULL;IF USER_ID('sccrm_receipt_sync_005') IS NULL CREATE USER sccrm_receipt_sync_005 WITHOUT LOGIN;",{},{copy:true});
+  copy.sql(t,receiverStatements(b,t.database,p.receiver),{hash:p.receiverHash},{copy:true,transaction:true});
+  const read=()=>copy.sql(t,"SELECT receiver_hash FROM dbo.SCCRM_ReceiptSyncMeta;SELECT definition FROM sys.sql_modules WHERE object_id=OBJECT_ID('dbo.SCCRM_AttachReceiptMember');",{},{copy:true}).results;
+  const before=read();assert.equal(before[0][0].receiver_hash,p.receiverHash);assert.equal(definition(before[1][0].definition),definition(receiverStatements(b,t.database,p.receiver)[2]));
+  assert.throws(()=>copy.sql(t,[...receiverStatements(b,t.database,p.receiver),"CREATE TABLE dbo.SCCRM_UpgradeRollbackFixture(id int);RAISERROR('RECEIPT_EXPECTED_COPY_ROLLBACK',16,1);"],{hash:'b'.repeat(64)},{copy:true,transaction:true}));
+  assert.deepEqual(read(),before);assert.equal(copy.sql(t,"SELECT OBJECT_ID('dbo.SCCRM_UpgradeRollbackFixture') id",{},{copy:true}).results[0][0].id,null);
+  const result={ok:true,action,receiverHash:p.receiverHash,clientTransactionDDL:true,failedDDLRolledBack:true,productionWrites:0};fs.writeFileSync(path.join(copy.RUNTIME,'upgrade-copy-proof.json'),JSON.stringify(result,null,2));return result;
+ }
  if(action==='preflight'){
   const p=proof(),native=branches.map(inspect),customers=branches.map(snapshot),sales=receipts();
   fs.writeFileSync(path.join(copy.RUNTIME,'live-before.json'),JSON.stringify({at:new Date().toISOString(),native,customers,sales,receiverHash:p.receiverHash},null,2));
@@ -47,10 +60,9 @@ async function run(action){
   const results=[];
   for(const b of branches){
    const current=inspect(b),prior=backup.native.find(n=>n.branch===b);if(current.definition!==prior.definition)throw Error('RECEIPT_TIME_NATIVE_CHANGED_SINCE_PREFLIGHT');
-   const statements=['SET XACT_ABORT ON;',"IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL BEGIN "+fs.readFileSync(path.join(__dirname,'native-time-audit.sql'),'utf8')+' END;',p.receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__','AdaAcc').replaceAll('__TARGET__',b),
-    `DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptTimeAudit TO [sccrm_receipt_sync_${b}];UPDATE dbo.SCCRM_ReceiptSyncMeta SET receiver_hash=@hash WHERE singleton=1;`];
+   const statements=receiverStatements(b,'AdaAcc',p.receiver);
    copy.sql(copy.target(b),statements,{hash:p.receiverHash},{transaction:true});
-   const after=inspect(b);if(after.definition!==p.receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__','AdaAcc').replaceAll('__TARGET__',b)||after.meta.receiver_hash!==p.receiverHash)throw Error('RECEIPT_TIME_NATIVE_READBACK_FAILED');
+   const after=inspect(b);if(definition(after.definition)!==definition(receiverStatements(b,'AdaAcc',p.receiver)[2])||after.meta.receiver_hash!==p.receiverHash)throw Error('RECEIPT_TIME_NATIVE_READBACK_FAILED');
    results.push({branch:b,receiverHash:p.receiverHash,profileWrites:0,receiptWrites:0,pointWrites:0});
   }
   const result={ok:true,action,commit,results,at:new Date().toISOString()};fs.writeFileSync(path.join(copy.RUNTIME,'native-upgrade.json'),JSON.stringify(result,null,2));return result;
