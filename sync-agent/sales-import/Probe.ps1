@@ -1,0 +1,20 @@
+param()
+$ErrorActionPreference='Stop';[Console]::InputEncoding=[Text.Encoding]::UTF8;[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$p=$null;$db=$null;$b=$null
+try{
+ $p=[Console]::In.ReadToEnd()|ConvertFrom-Json;$branch=[string]$p.branch
+ $targets=@{'000'=@('tcp:100.90.166.72,49800','SERVER');'001'=@('100.81.137.41\SQLEXPRESS','SC_001');'003'=@('100.77.101.94\SQLEXPRESS','POSSRV');'004'=@('100.113.59.42\SQLEXPRESS','SERVER004');'005'=@('100.106.107.80\SQLEXPRESS','POSSRV')}
+ if(!$targets.ContainsKey($branch)){throw 'SALES_PROBE_SCOPE_REFUSED'}
+ $b=New-Object Data.SqlClient.SqlConnectionStringBuilder;$b['Data Source']=$targets[$branch][0];$b['Initial Catalog']='AdaAcc';$b['User ID']=$p.admin.user;$b['Password']=$p.admin.password;$b['Pooling']=$false;$b['Connect Timeout']=5;$b['Application Name']='SCCRM-Sales-Discovery-ReadOnly'
+ $db=New-Object Data.SqlClient.SqlConnection $b.ConnectionString;$db.Open();$b['Password']='';$p.admin.password=''
+ function Q([string]$sql){$q=$db.CreateCommand();$q.CommandTimeout=8;$q.CommandText=$sql;$r=$null;$rows=@();try{$r=$q.ExecuteReader();while($r.Read()){$row=[ordered]@{};for($i=0;$i -lt $r.FieldCount;$i++){$v=$r.GetValue($i);if($v -is [DBNull]){$v=$null}elseif($v -is [DateTime]){$v=$v.ToString('o',[Globalization.CultureInfo]::InvariantCulture)};$row[$r.GetName($i)]=$v};$rows+=[pscustomobject]$row};return ,$rows}finally{if($r){$r.Dispose()};$q.Dispose()}}
+ $identity=Q "SELECT CONVERT(varchar(128),SERVERPROPERTY('MachineName')) machine,DB_NAME() db"
+ if($identity[0].machine -cne $targets[$branch][1] -or $identity[0].db -cne 'AdaAcc'){throw 'SALES_PROBE_TARGET_REFUSED'}
+ $native=Q "SELECT FNSynSeqNo,FTSynName,FTSynTblFrm,FTSynTblTo,FTSynType,FTSynAllow,FTSynSchedule,FTSynUsage,FDSynLast,FDSynConLast FROM dbo.TCNTSyncTask WHERE FTSynTblFrm LIKE '%Sal%' OR FTSynTblTo LIKE '%Sal%' OR FTSynTblFrm LIKE '%Void%' ORDER BY FNSynSeqNo"
+ $cols=Q "SELECT t.name table_name,c.name column_name,ty.name type_name,c.max_length,c.precision,c.scale,c.is_nullable,c.is_identity,c.is_computed,c.column_id FROM sys.tables t JOIN sys.columns c ON c.object_id=t.object_id JOIN sys.types ty ON ty.user_type_id=c.user_type_id WHERE t.name IN('TPSTSalHD','TPSTSalDT','TPSTSalRC','TPSTSalPD','TPSTSalPG','TPSTSalPH','TPSTSalInvCsm','TPSTVoidDT') ORDER BY t.name,c.column_id"
+ $indexes=Q "SELECT t.name table_name,i.name index_name,i.is_unique,i.is_primary_key,c.name column_name,ic.key_ordinal FROM sys.tables t JOIN sys.indexes i ON i.object_id=t.object_id JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE t.name IN('TPSTSalHD','TPSTSalDT','TPSTSalRC','TPSTSalPD','TPSTSalPG','TPSTSalPH','TPSTSalInvCsm','TPSTVoidDT') AND ic.key_ordinal>0 ORDER BY t.name,i.name,ic.key_ordinal"
+ $triggers=Q "SELECT t.name table_name,tr.name FROM sys.tables t JOIN sys.triggers tr ON tr.parent_id=t.object_id WHERE t.name IN('TPSTSalHD','TPSTSalDT','TPSTSalRC','TPSTSalPD','TPSTSalPG','TPSTSalPH','TPSTSalInvCsm','TPSTVoidDT') AND tr.is_disabled=0"
+ $recent=@();foreach($bc in $(if($branch -ceq '000'){@('001','003','004','005')}else{@($branch)})){foreach($pos in @('001','002')){foreach($prefix in @('S','R')){$no=$prefix+'2611'+$bc+$pos+'-';$last=Q ("SELECT TOP(1) FTShdDocNo,FTBchCode,FTPosCode,FDShdDocDate,FTShdDocTime,FTShdDocType,FTShdStaDoc,FTShdStaPaid FROM dbo.TPSTSalHD WHERE FTShdDocNo LIKE '"+$no+"%' ORDER BY FTShdDocNo DESC");$recent+=@{branch=$bc;pos=$pos;prefix=$prefix;latest=$last}}}}
+ @{ok=$true;branch=$branch;machine=$identity[0].machine;at=[DateTime]::UtcNow.ToString('o');nativeTasks=$native;columns=$cols;indexes=$indexes;triggers=$triggers;recent=$recent;dataWrites=0;pinRead=$false}|ConvertTo-Json -Depth 8 -Compress
+}catch{@{ok=$false;branch=$branch;code='SALES_PROBE_FAILED';type=$_.Exception.GetBaseException().GetType().Name;dataWrites=0;pinRead=$false}|ConvertTo-Json -Compress;exit 1}
+finally{if($db){$db.Dispose()};if($b){$b['Password']=''};if($p){$p.admin.password=''}}
