@@ -54,6 +54,7 @@ internal static class DesktopFeatureCheck
                 RenderPreviews();
                 RegistrationOrigins();
                 MemberSelection();
+                MemberReadyRefresh();
                 RegistrationPhones();
                 RegistrationChoices();
                 MemberEditing();
@@ -273,6 +274,116 @@ internal static class DesktopFeatureCheck
     private static T EditField<T>(object form, string name)
     {
         return (T)form.GetType().GetField(name, BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
+    }
+
+    private static void SetClaimField(MemberClaimForm form, string name, object value)
+    {
+        typeof(MemberClaimForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(form, value);
+    }
+
+    private static MemberClaimForm PendingMemberForm(AdaPosWatcher watcher, CustomerDisplayController display)
+    {
+        var form = new MemberClaimForm(new ApiClient("http://127.0.0.1:1"), watcher, 25, "synthetic", null, display);
+        var grid = EditField<DataGridView>(form, "_dgvResults");
+        var handle = grid.Handle;
+        typeof(MemberClaimForm).GetMethod("AddMemberRow", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, new object[] {
+            new MemberSearchResult { Id="synthetic-pending", DisplayName="Synthetic pending", MemberCode="SCM-SYNTHETIC",
+                PointsAvailable=false, CurrentPoints=null, PointsSource="ada", PointsStatus="unknown" }
+        });
+        grid.Rows[0].Selected = true;
+        SetClaimField(form, "_receipt", new SCCRMonPOS.Models.PosReceipt {
+            DocNo="SYNTHETIC-PAID", BranchCode="005", PosCode="002", DocType="1", GrandTotal=100,
+            Items=new List<SCCRMonPOS.Models.PosReceiptItem> { new SCCRMonPOS.Models.PosReceiptItem { ProductCode="SYNTHETIC",Qty=1,NetAmount=100 } }
+        });
+        SetClaimField(form, "_receiptStatusVerified", true);
+        SetClaimField(form, "_receiptClaimStatus", new ReceiptClaimStatus { Claimed=false });
+        return form;
+    }
+
+    private static bool CanClaim(MemberClaimForm form)
+    {
+        return (bool)typeof(MemberClaimForm).GetMethod("CanConfirm",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null);
+    }
+
+    private static T PumpMemberRefresh<T>(Task<T> task)
+    {
+        var watch=System.Diagnostics.Stopwatch.StartNew();
+        while(!task.IsCompleted && watch.ElapsedMilliseconds<3000) { Application.DoEvents(); Thread.Sleep(1); }
+        Check(task.IsCompleted);
+        return task.GetAwaiter().GetResult();
+    }
+
+    private static void MemberReadyRefresh()
+    {
+        using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope("005","002")))
+        using(var display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-ready-refresh-test")))
+        {
+            Func<MemberDetail> ready=()=>new MemberDetail { Id="synthetic-pending", MemberCode="AR000-000001", CurrentPoints=0,
+                PointsAvailable=true, PointsSource="ada", PointsStatus="available", BalanceExact="0.00000000000000000" };
+            stage="pending-new-member-recovers-without-another-search";
+            using(var form=PendingMemberForm(watcher,display))
+            {
+                var selected=EditField<MemberSearchResult>(form,"_selectedMember");
+                Check(selected!=null && !selected.PointsAvailable && !CanClaim(form));
+                Check(EditField<System.Windows.Forms.Timer>(form,"_memberReadyTimer").Interval==5000);
+                Check(EditField<Label>(form,"_lblMemberPoints").Text.Contains("อัตโนมัติ"));
+                Check(PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=> { Check(id==selected.Id); return Task.FromResult(ready()); })));
+                Check(ReferenceEquals(selected,EditField<MemberSearchResult>(form,"_selectedMember")) && selected.Id=="synthetic-pending");
+                Check(selected.PointsAvailable && selected.CurrentPoints==0 && selected.MemberCode=="AR000-000001" && CanClaim(form));
+                var grid=EditField<DataGridView>(form,"_dgvResults");
+                Check((string)grid.Rows[0].Cells["MemberCode"].Value=="AR000-000001" && (string)grid.Rows[0].Cells["Points"].Value==selected.BalanceExact);
+                Check(!PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=> { throw new Exception("Must not poll ready member"); })));
+            }
+            stage="pending-member-failures-and-wrong-identity-stay-unavailable";
+            using(var form=PendingMemberForm(watcher,display))
+            {
+                Check(!PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>Task.FromException<MemberDetail>(new ApiException("synthetic unavailable")))));
+                Check(!CanClaim(form) && EditField<MemberSearchResult>(form,"_selectedMember").CurrentPoints==null);
+                var wrong=ready(); wrong.Id="synthetic-other";
+                Check(!PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>Task.FromResult(wrong))));
+                Check(!CanClaim(form));
+                Check(PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>Task.FromResult(new MemberDetail { Id=id,MemberCode="AR000-000001",PointsAvailable=false,CurrentPoints=null,PointsSource="ada" }))));
+                Check(!CanClaim(form) && EditField<MemberSearchResult>(form,"_selectedMember").CurrentPoints==null);
+            }
+            stage="member-refresh-is-single-flight-and-never-switches-people";
+            using(var form=PendingMemberForm(watcher,display))
+            {
+                var delayed=new TaskCompletionSource<MemberDetail>(); int calls=0;
+                var pending=form.RefreshSelectedMemberPointsAsync(id=>{ calls++;return delayed.Task; });
+                Check(!PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>{ calls++;return Task.FromResult(ready()); })) && calls==1);
+                var grid=EditField<DataGridView>(form,"_dgvResults");
+                typeof(MemberClaimForm).GetMethod("AddMemberRow",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{
+                    new MemberSearchResult { Id="synthetic-other", DisplayName="Different fixture",PointsAvailable=false }
+                });
+                grid.ClearSelection();grid.Rows[1].Selected=true;
+                Check(EditField<MemberSearchResult>(form,"_selectedMember").Id=="synthetic-other");
+                delayed.SetResult(ready());
+                Check(!PumpMemberRefresh(pending) && !CanClaim(form));
+                Check(EditField<MemberSearchResult>(form,"_selectedMember").Id=="synthetic-other");
+            }
+            stage="member-refresh-preserves-receipt-and-edit-guards";
+            using(var form=PendingMemberForm(watcher,display))
+            using(var editor=new NewMemberForm(null))
+            {
+                form.AddOwnedForm(editor);
+                Check(!PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>{throw new Exception("Must not refresh during edit");})));
+                form.RemoveOwnedForm(editor);
+                SetClaimField(form,"_receiptClaimStatus",new ReceiptClaimStatus { Claimed=true });
+                Check(PumpMemberRefresh(form.RefreshSelectedMemberPointsAsync(id=>Task.FromResult(ready()))));
+                Check(!CanClaim(form) && !EditField<Button>(form,"_btnConfirm").Enabled);
+                SetClaimField(form,"_receiptClaimStatus",new ReceiptClaimStatus { Claimed=false });
+                SetClaimField(form,"_receiptStatusChecking",true);Check(!CanClaim(form));
+                SetClaimField(form,"_receiptStatusChecking",false);SetClaimField(form,"_uiBusy",true);Check(!CanClaim(form));
+            }
+            stage="late-member-refresh-after-close-is-ignored";
+            using(var form=PendingMemberForm(watcher,display))
+            {
+                var delayed=new TaskCompletionSource<MemberDetail>();
+                var pending=form.RefreshSelectedMemberPointsAsync(id=>delayed.Task);
+                form.Dispose();delayed.SetResult(ready());
+                Check(!PumpMemberRefresh(pending));
+            }
+        }
     }
 
     private static void RegistrationChoices()

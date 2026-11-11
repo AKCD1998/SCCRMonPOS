@@ -34,6 +34,8 @@ namespace SCCRMonPOS
         private Label _receiptStatusLabel;
         private ToolTip _receiptStatusTip;
         private Timer _promotionTimer;
+        private Timer _memberReadyTimer;
+        private bool _memberRefreshInFlight;
         internal Func<bool> IsParkedForSales;
 
         public void ShowUpdateNotice(string version, Action openUpdates)
@@ -77,13 +79,16 @@ namespace SCCRMonPOS
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
-            FormClosed += (s, e) => { ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
+            FormClosed += (s, e) => { ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); _memberReadyTimer?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
             _promotionTimer = new Timer { Interval = 30000 };
             _promotionTimer.Tick += async (s, e) => {
                 await RefreshCentralQuoteAsync();
                 if (!_uiBusy && !_claimCompleted && _receiptClaimStatus?.Claimed != true) await RefreshReceiptClaimStatusAsync();
             };
             _promotionTimer.Start();
+            _memberReadyTimer = new Timer { Interval = 5000 };
+            _memberReadyTimer.Tick += async (s, e) => await RefreshSelectedMemberPointsAsync(_api.GetMemberAsync);
+            _memberReadyTimer.Start();
 
             if (prefilledReceipt != null)
                 LoadReceipt(prefilledReceipt);
@@ -474,6 +479,42 @@ namespace SCCRMonPOS
             UpdateConfirmButton();
         }
 
+        // A newly registered member can precede the HQ assignment/point cache.
+        // Re-read the same UUID; never infer or switch a person from their phone.
+        internal async Task<bool> RefreshSelectedMemberPointsAsync(Func<string, Task<MemberDetail>> load)
+        {
+            var selected = _selectedMember;
+            if (IsDisposed || _uiBusy || _claimCompleted || _memberRefreshInFlight ||
+                OwnedForms.Length != 0 || selected == null || selected.PointsAvailable) return false;
+            _memberRefreshInFlight = true;
+            try
+            {
+                var current = await load(selected.Id);
+                if (IsDisposed || _uiBusy || _claimCompleted || OwnedForms.Length != 0 ||
+                    !ReferenceEquals(selected, _selectedMember) || current == null ||
+                    !string.Equals(current.Id, selected.Id, StringComparison.Ordinal)) return false;
+                selected.CurrentPoints = current.CurrentPoints;
+                selected.PointsAvailable = current.PointsAvailable;
+                selected.PointsSource = current.PointsSource;
+                selected.PointsStatus = current.PointsStatus;
+                selected.PointsObservedAt = current.PointsObservedAt;
+                selected.BalanceExact = current.BalanceExact;
+                if (!string.IsNullOrWhiteSpace(current.MemberCode)) selected.MemberCode = current.MemberCode;
+                foreach (DataGridViewRow row in _dgvResults.Rows)
+                {
+                    if (!ReferenceEquals(row.Tag, selected)) continue;
+                    row.Cells["MemberCode"].Value = selected.MemberCode;
+                    row.Cells["Points"].Value = PointMetadata.Format(selected.CurrentPoints, selected.BalanceExact, selected.PointsAvailable);
+                    break;
+                }
+                ShowMemberSummary(selected);
+                UpdateConfirmButton();
+                return true;
+            }
+            catch { return false; } // Keep unavailable distinct from a zero balance; the next tick retries.
+            finally { _memberRefreshInFlight = false; }
+        }
+
         private void ShowMemberSummary(MemberSearchResult member)
         {
             if (member == null)
@@ -487,7 +528,7 @@ namespace SCCRMonPOS
             _lblMemberName.Text = member.DisplayName + (string.IsNullOrWhiteSpace(member.Phone) ? "" : " | " + member.Phone);
             if (!member.PointsAvailable)
             {
-                _lblMemberPoints.Text = "แต้มปัจจุบัน: - (ยังอ่านข้อมูลแต้มไม่ได้)";
+                _lblMemberPoints.Text = "แต้มปัจจุบัน: - (รอข้อมูล ระบบจะตรวจให้อัตโนมัติ)";
                 _pnlMemberSummary.Visible = true;
                 _btnEditMember.Visible = true;
                 return;
@@ -773,6 +814,7 @@ namespace SCCRMonPOS
         private void ShowSuccess(LoyaltyClaimResponse response)
         {
             _promotionTimer?.Stop();
+            _memberReadyTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
             _lblStatus.Text = response.UsesAdaPoints
                 ? "บันทึกประวัติบิลแล้ว · " + (response.PointsStatus=="not_recorded_by_ada" ? "Ada ยังไม่มีรายการแต้มของบิลนี้" : "แต้มที่ Ada บันทึก " + PointMetadata.Format(response.AwardedPoints,response.AwardedPointsExact)) +

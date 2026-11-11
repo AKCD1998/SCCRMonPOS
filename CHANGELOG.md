@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.22 — 2026-11-11
+
+- Retry the selected member's unavailable points by the same UUID every five
+  seconds. Refresh its assigned AR code and enable receipt confirmation once
+  the server reports points ready, without another member search.
+- Show a short waiting message instead of leaving the disabled button unexplained.
+  Ignore late responses after selection changes, edits or closure; do not submit
+  receipts, invent a zero balance, change Ada points or relax duplicate guards.
+
 ## 1.3.21 — 2026-11-10
 
 ### 2026-11-10 — Cashier chooses existing member or a different person
