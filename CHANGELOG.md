@@ -10,6 +10,8 @@
 - Add five isolated SQL copy tests, three-real-receipt adapter checks, non-PIN
   preservation evidence and a scoped committed-source service/receiver upgrade.
   Keep desktop clients, member fast lane, Ada points and Shopee unchanged.
+- Keep receiver-upgrade DDL inside one client-owned SQL transaction so a failed
+  upgrade rolls back every owned object before the original worker resumes.
 
 ## HQ automatic sales import — 2026-11-11
 

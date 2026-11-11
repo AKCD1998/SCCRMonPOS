@@ -47,9 +47,9 @@ async function run(action){
   const results=[];
   for(const b of branches){
    const current=inspect(b),prior=backup.native.find(n=>n.branch===b);if(current.definition!==prior.definition)throw Error('RECEIPT_TIME_NATIVE_CHANGED_SINCE_PREFLIGHT');
-   const statements=['SET XACT_ABORT ON;BEGIN TRANSACTION;',"IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL BEGIN "+fs.readFileSync(path.join(__dirname,'native-time-audit.sql'),'utf8')+' END;',p.receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__','AdaAcc').replaceAll('__TARGET__',b),
-    `DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptTimeAudit TO [sccrm_receipt_sync_${b}];UPDATE dbo.SCCRM_ReceiptSyncMeta SET receiver_hash=@hash WHERE singleton=1;COMMIT TRANSACTION;`];
-   copy.sql(copy.target(b),statements,{hash:p.receiverHash});
+   const statements=['SET XACT_ABORT ON;',"IF OBJECT_ID('dbo.SCCRM_ReceiptTimeAudit') IS NULL BEGIN "+fs.readFileSync(path.join(__dirname,'native-time-audit.sql'),'utf8')+' END;',p.receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__','AdaAcc').replaceAll('__TARGET__',b),
+    `DENY SELECT,INSERT,UPDATE,DELETE,ALTER ON dbo.SCCRM_ReceiptTimeAudit TO [sccrm_receipt_sync_${b}];UPDATE dbo.SCCRM_ReceiptSyncMeta SET receiver_hash=@hash WHERE singleton=1;`];
+   copy.sql(copy.target(b),statements,{hash:p.receiverHash},{transaction:true});
    const after=inspect(b);if(after.definition!==p.receiver.replace('CREATE PROCEDURE','ALTER PROCEDURE').replaceAll('__DATABASE__','AdaAcc').replaceAll('__TARGET__',b)||after.meta.receiver_hash!==p.receiverHash)throw Error('RECEIPT_TIME_NATIVE_READBACK_FAILED');
    results.push({branch:b,receiverHash:p.receiverHash,profileWrites:0,receiptWrites:0,pointWrites:0});
   }
