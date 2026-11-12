@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.25 — 2026-11-12
+
+- Preserve SCCRM-first saving and explain the separate completeness check after
+  confirmation. The existing sync log displays verification and repair results.
+- Add an independent headless reconciliation lane per source branch. Read a
+  narrowly scoped, execute-only native snapshot procedure twice, then compare
+  branch and HQ. No GUI, customer writes, native sale creation or point award.
+- Retry offline/unstable sources durably, retain leases across worker failures,
+  detect later native changes and expose conflicts rather than overwriting them.
+- Validate copied real receipts end to end, repeated audits, permission boundaries,
+  preserved customer/sale/point rows and non-blocking offline branches.
+
 ## 1.3.24 — 2026-11-12
 
 - Refresh the native receipt again when staff confirm, preserving their selected

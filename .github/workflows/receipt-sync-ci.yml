@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test sync-agent/receipts/worker.test.cjs
+      - run: node --test sync-agent/receipts/worker.test.cjs sync-agent/receipts/completeness.test.cjs
   receipt-host:
     runs-on: windows-latest
     steps:

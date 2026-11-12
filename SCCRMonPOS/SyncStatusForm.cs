@@ -33,6 +33,14 @@ namespace SCCRMonPOS
         [DataMember(Name="attempts")] public int Attempts { get; set; }
         [DataMember(Name="createdAt")] public string CreatedAt { get; set; }
         [DataMember(Name="nextAttemptAt")] public string NextAttemptAt { get; set; }
+        [DataMember(Name="completeness")] public SyncCompleteness Completeness { get; set; }
+    }
+    [DataContract] public sealed class SyncCompleteness
+    {
+        [DataMember(Name="state")] public string State { get; set; }
+        [DataMember(Name="label")] public string Label { get; set; }
+        [DataMember(Name="verifiedAt")] public string VerifiedAt { get; set; }
+        [DataMember(Name="nextCheckAt")] public string NextCheckAt { get; set; }
     }
     [DataContract] public sealed class SyncEvent
     {
@@ -67,7 +75,7 @@ namespace SCCRMonPOS
             ClientSize=new Size(Math.Max(540,Math.Min(720,(int)(area.Width*0.7))),Math.Max(360,Math.Min(540,area.Height-120)));
             MinimumSize=new Size(540,360);
             var heading=new Label { Dock=DockStyle.Top,Height=54,Padding=new Padding(10),
-                Text="ข้อมูลเก็บใน SCCRM แล้ว การส่ง Ada ทำต่อเบื้องหลัง\r\nแต้มใช้ข้อมูลจาก Ada — ปุ่มลองใหม่ไม่สร้างบิลหรือเพิ่มแต้ม" };
+                Text="ข้อมูลเก็บใน SCCRM แล้ว ระบบจะเติมข้อมูลที่ขาดและตรวจซ้ำเอง\r\nแต้มใช้ข้อมูลจาก Ada — ปุ่มลองใหม่ไม่สร้างบิลหรือเพิ่มแต้ม" };
             var bar=new FlowLayoutPanel { Dock=DockStyle.Top,Height=43,Padding=new Padding(6) };
             var all=new Button { Text="ดูทั้งสาขา",AutoSize=true };
             bar.Controls.AddRange(new Control[]{_refresh,_retry,all});
@@ -98,7 +106,7 @@ namespace SCCRMonPOS
         private void RetryEnabled()
         {
             var selected=Selected;
-            _retry.Enabled=!_loading&&!_retrying&&selected!=null&&selected.State!="running"&&selected.State!="succeeded";
+            _retry.Enabled=!_loading&&!_retrying&&selected!=null&&selected.State!="running"&&selected.State!="succeeded"&&selected.Completeness?.State!="running";
         }
         internal async Task RefreshAsync()
         {
@@ -132,6 +140,9 @@ namespace SCCRMonPOS
                 if(IsDisposed||generation!=_detailGeneration||Selected?.Id!=selected.Id)return;
                 _events.Text="บันทึกใน SCCRM แล้ว · ตรวจ "+result.Job.Attempts+" ครั้ง"+
                     (string.IsNullOrEmpty(result.Job.NextAttemptAt)?"":" · ครั้งถัดไป "+When(result.Job.NextAttemptAt))+"\r\n"+
+                    (result.Job.Completeness==null?"":result.Job.Completeness.Label+
+                        " · ตรวจครบล่าสุด "+When(result.Job.Completeness.VerifiedAt)+
+                        " · ตรวจซ้ำครั้งถัดไป "+When(result.Job.Completeness.NextCheckAt)+"\r\n")+
                     string.Join("\r\n",result.Events.Select(e=>When(e.At)+"  "+e.Label));
             }catch{if(!IsDisposed&&generation==_detailGeneration)_events.Text="ยังอ่านประวัติการส่งไม่ได้ กดโหลดสถานะใหม่ได้";}
         }
