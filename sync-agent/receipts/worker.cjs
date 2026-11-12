@@ -31,7 +31,7 @@ function createWorker({api,receive,probe=async()=>{},targets,onStatus=()=>{},sto
 function httpApi({token,fetchImpl=globalThis.fetch}){
  if(typeof token!=='string'||token.length<32)throw Error('RECEIPT_WORKER_CREDENTIAL_REQUIRED');
  return async(action,body)=>{
-  if(!['lease','acknowledge'].includes(action))throw Error('RECEIPT_WORKER_ACTION_REFUSED');
+  if(!['lease','acknowledge','completeness-lease','completeness-acknowledge'].includes(action))throw Error('RECEIPT_WORKER_ACTION_REFUSED');
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
   try{
    const response=await fetchImpl('https://sc-official-website.onrender.com/internal/sccrm-receipt-sync/'+action,{method:'POST',redirect:'error',signal:controller.signal,

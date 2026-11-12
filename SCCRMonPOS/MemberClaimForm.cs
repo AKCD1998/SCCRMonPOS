@@ -844,7 +844,7 @@ namespace SCCRMonPOS
             _promotionTimer?.Stop();
             _memberReadyTimer?.Stop();
             _lblStatus.ForeColor = Color.FromArgb(24, 140, 52);
-            _lblStatus.Text = response.HistoryFirst ? "บันทึกประวัติใน SCCRM แล้ว · ระบบจะตรวจการส่ง Ada ต่อเอง ดูได้ที่เมนูเพิ่มเติม"
+            _lblStatus.Text = response.HistoryFirst ? "บันทึกประวัติใน SCCRM แล้ว · ระบบจะตรวจและเติมข้อมูลบิลให้ครบ ดูสถานะได้ที่เมนูเพิ่มเติม"
                 : response.UsesAdaPoints
                 ? "บันทึกประวัติบิลแล้ว · " + (response.PointsStatus=="not_recorded_by_ada" ? "Ada ยังไม่มีรายการแต้มของบิลนี้" : "แต้มที่ Ada บันทึก " + PointMetadata.Format(response.AwardedPoints,response.AwardedPointsExact)) +
                   " | แต้มปัจจุบัน " + PointMetadata.Format(response.NewPointsBalance,response.BalanceExact)
