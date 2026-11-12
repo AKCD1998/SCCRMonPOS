@@ -23,10 +23,20 @@ namespace SCCRMonPOS
         private bool UsesAdaPoints { get { return _adaPointsMode || _selectedMember?.UsesAdaPoints == true; } }
         private bool _uiBusy;
         private bool _claimCompleted;
+        private PurchaseHistoryForm _historyForm;
+        private string _historyMemberId;
+        private bool HasPendingOwnedWindow
+        {
+            get {
+                foreach (Form form in OwnedForms)
+                    if (!form.IsDisposed && (!ReferenceEquals(form, _historyForm) || form.Visible)) return true;
+                return false;
+            }
+        }
         public bool ReadyForAdminUpdate
         {
             get { return !_uiBusy && !_receiptStatusChecking && !(_receipt != null &&
-                !_claimCompleted && _receiptClaimStatus?.Claimed != true) && OwnedForms.Length == 0; }
+                !_claimCompleted && _receiptClaimStatus?.Claimed != true) && !HasPendingOwnedWindow; }
         }
         private ReceiptClaimStatus _receiptClaimStatus;
         private bool _receiptStatusVerified, _receiptStatusChecking, _receiptStatusError;
@@ -81,7 +91,7 @@ namespace SCCRMonPOS
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
-            FormClosed += (s, e) => { ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); _memberReadyTimer?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
+            FormClosed += (s, e) => { _historyForm?.Dispose(); ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); _memberReadyTimer?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
             _promotionTimer = new Timer { Interval = 30000 };
             _promotionTimer.Tick += async (s, e) => {
                 await RefreshCentralQuoteAsync();
@@ -259,10 +269,39 @@ namespace SCCRMonPOS
             string memberId   = _selectedMember != null ? _selectedMember.Id : null;
             string memberName = _selectedMember != null ? _selectedMember.DisplayName : null;
 
-            using (var form = new PurchaseHistoryForm(_api, memberId, memberName))
-            {
-                form.ShowDialog(this);
+            if (_historyForm == null || _historyForm.IsDisposed) {
+                _historyForm = new PurchaseHistoryForm(_api, memberId, memberName);
+                _historyForm.StartPosition = FormStartPosition.Manual;
+                var location = new Point(Left + (Width - _historyForm.Width) / 2, Top + (Height - _historyForm.Height) / 2);
+                if (Bounds.IntersectsWith(SystemInformation.VirtualScreen)) {
+                    var area = Screen.FromControl(this).WorkingArea;
+                    location.X = Math.Max(area.Left, Math.Min(location.X, area.Right - _historyForm.Width));
+                    location.Y = Math.Max(area.Top, Math.Min(location.Y, area.Bottom - _historyForm.Height));
+                }
+                _historyForm.Location = location;
+                _historyMemberId = memberId;
+                _historyForm.ReturnToMemberRequested += (s, args) => ReturnToMemberView();
+                _historyForm.FormClosed += (s, args) => {
+                    if (ReferenceEquals(_historyForm, s)) { _historyForm = null; _historyMemberId = null; }
+                };
             }
+            else if (!string.IsNullOrWhiteSpace(memberId) && memberId != _historyMemberId) {
+                _historyMemberId = memberId;
+                _ = _historyForm.ShowMemberAsync(memberId, memberName);
+            }
+            // History is read-only. It must never disable receipt/member entry.
+            if (!_historyForm.Visible) _historyForm.Show(this);
+            CashierWindowGuard.ActivateForInteraction(_historyForm);
+        }
+
+        internal void ReturnToMemberView()
+        {
+            // Keep the query, selection and loaded history for the next visit.
+            // A real edit/confirmation dialog remains modal and keeps its input.
+            if (_historyForm != null && !_historyForm.IsDisposed && _historyForm.Visible &&
+                CashierWindowGuard.InteractionTarget(_historyForm) == _historyForm.Handle)
+                _historyForm.Hide();
+            CashierWindowGuard.ActivateForInteraction(this);
         }
 
         private void LoadReceipt(PosReceipt receipt)
@@ -492,12 +531,12 @@ namespace SCCRMonPOS
         {
             var selected = _selectedMember;
             if (IsDisposed || _uiBusy || _claimCompleted || _memberRefreshInFlight ||
-                OwnedForms.Length != 0 || selected == null || selected.PointsAvailable) return false;
+                HasPendingOwnedWindow || selected == null || selected.PointsAvailable) return false;
             _memberRefreshInFlight = true;
             try
             {
                 var current = await load(selected.Id);
-                if (IsDisposed || _uiBusy || _claimCompleted || OwnedForms.Length != 0 ||
+                if (IsDisposed || _uiBusy || _claimCompleted || HasPendingOwnedWindow ||
                     !ReferenceEquals(selected, _selectedMember) || current == null ||
                     !string.Equals(current.Id, selected.Id, StringComparison.Ordinal)) return false;
                 selected.CurrentPoints = current.CurrentPoints;

@@ -40,6 +40,10 @@ internal static class DesktopFeatureCheck
                 release.VerifyExecutable(Path.Combine(Path.GetDirectoryName(args[1]), "SCCRMonPOS.exe"));
                 Check(true);
             }
+            else if (args.Length == 1 && args[0] == "--window-navigation")
+            {
+                MemberWindowNavigation();
+            }
             else
             {
                 var root = Path.Combine(Path.GetTempPath(), "sccrm-desktop-check-" + Guid.NewGuid().ToString("N"));
@@ -60,6 +64,7 @@ internal static class DesktopFeatureCheck
                 RegistrationChoices();
                 MemberEditing();
                 PurchaseHistoryLayout();
+                MemberWindowNavigation();
                 CashierWindowSwitching();
             }
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + ",\"stage\":\"" + stage + "\"}"); return 0;
@@ -558,7 +563,11 @@ internal static class DesktopFeatureCheck
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
     [DllImport("user32.dll", EntryPoint = "PostMessageW")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowEx(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, IntPtr owner, IntPtr menu, IntPtr instance, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern bool EnableWindow(IntPtr window, bool enabled);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr window);
 
     private static void CashierWindowSwitching()
     {
@@ -677,6 +686,88 @@ internal static class DesktopFeatureCheck
                 Check(area.Contains(button));
                 Check(button.Width == 196 && button.Height == 36);
             }
+        }
+    }
+
+    private static void MemberWindowNavigation()
+    {
+        stage = "history-never-disables-member-entry";
+        var api = new ApiClient("http://127.0.0.1:1");
+        using (var display = new CustomerDisplayController(Path.Combine(Path.GetTempPath(), "sccrm-navigation-" + Guid.NewGuid().ToString("N"))))
+        using (var member = new MemberClaimForm(api, null, 25, "synthetic-navigation", null, display))
+        using (var sale = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-14000,-14000), ShowInTaskbar = false })
+        using (var guard = new CashierWindowGuard())
+        {
+            member.StartPosition = FormStartPosition.Manual; member.Location = new Point(-12000,-12000); member.ShowInTaskbar = false;
+            guard.Protect(member); member.Show();
+            var fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            var historyField = typeof(MemberClaimForm).GetField("_historyForm", fields);
+            var historyButton = (Button)typeof(MemberClaimForm).GetField("_btnTabHistory", fields).GetValue(member);
+            var receipt = (TextBox)typeof(MemberClaimForm).GetField("_txtReceiptNo", fields).GetValue(member);
+            var memberSearch = (TextBox)typeof(MemberClaimForm).GetField("_txtMemberSearch", fields).GetValue(member);
+            receipt.Text = "S-SYNTHETIC-UNSAVED"; memberSearch.Text = "Synthetic cashier input";
+            historyButton.PerformClick();
+            var history = (PurchaseHistoryForm)historyField.GetValue(member);
+            Check(history != null && history.Visible && !history.Modal && member.Enabled);
+            Check(history.Owner == member && member.OwnedForms.Length == 1);
+            Check(!member.ReadyForAdminUpdate && TrayAppContext.BlocksFleetUpdate(history, member));
+            var query = (TextBox)typeof(PurchaseHistoryForm).GetField("_txtSearch", fields).GetValue(history);
+            query.Text = "Synthetic history query";
+            stage = "hotkey-returns-to-enabled-member-after-sales";
+            sale.Show(); guard.Park(member.Handle); guard.Restore(member); member.ReturnToMemberView();
+            Check(member.Enabled && !history.Visible && !history.IsDisposed);
+            Check(CashierWindowGuard.InteractionTarget(member) == member.Handle);
+            Check(receipt.Text == "S-SYNTHETIC-UNSAVED" && memberSearch.Text == "Synthetic cashier input");
+            Check(member.ReadyForAdminUpdate && !TrayAppContext.BlocksFleetUpdate(history, member));
+            stage = "reopen-history-reuses-query-and-one-window";
+            historyButton.PerformClick();
+            Check(ReferenceEquals(history, historyField.GetValue(member)) && history.Visible && member.Enabled);
+            Check(query.Text == "Synthetic history query" && member.OwnedForms.Length == 1);
+            history.WindowState = FormWindowState.Minimized;
+            member.ReturnToMemberView(); historyButton.PerformClick();
+            Check(history.WindowState != FormWindowState.Minimized && member.Enabled);
+            var back = (Button)history.Controls.Find("backToMember", true).Single();
+            back.PerformClick();
+            Check(member.Enabled && !history.Visible && query.Text == "Synthetic history query");
+            historyButton.PerformClick();
+            stage = "real-modal-edit-keeps-input-and-is-the-activation-target";
+            using (var edit = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-12000,-12000), ShowInTaskbar = false })
+            using (var timer = new System.Windows.Forms.Timer { Interval = 20 })
+            {
+                var input = new TextBox { Text = "Synthetic unsaved edit" }; edit.Controls.Add(input);
+                Exception failure = null;
+                timer.Tick += (s,e) => {
+                    timer.Stop();
+                    try {
+                        Check(edit.Modal && !IsWindowEnabled(member.Handle));
+                        guard.Park(member.Handle); guard.Restore(member); member.ReturnToMemberView();
+                        Check(edit.Modal && edit.Visible && !IsWindowEnabled(member.Handle) && input.Text == "Synthetic unsaved edit");
+                        Check(CashierWindowGuard.InteractionTarget(member) == edit.Handle);
+                        Check(!member.ReadyForAdminUpdate);
+                        stage = "native-confirmation-owned-by-modal-edit-is-reachable";
+                        IntPtr confirmation = CreateWindowEx(0, "STATIC", "Synthetic native confirmation", 0x90000000, -12000, -12000, 100, 100, edit.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                        Check(confirmation != IntPtr.Zero);
+                        try {
+                            EnableWindow(edit.Handle, false); // synthetic modal fixture only
+                            Check(CashierWindowGuard.InteractionTarget(member) == confirmation);
+                            member.ReturnToMemberView();
+                            Check(edit.Modal && input.Text == "Synthetic unsaved edit");
+                        } finally { DestroyWindow(confirmation); EnableWindow(edit.Handle, true); }
+                    } catch (Exception ex) { failure = ex; }
+                    finally { edit.Close(); }
+                };
+                timer.Start(); edit.ShowDialog(member);
+                if (failure != null) throw failure;
+            }
+            Check(member.Enabled);
+            stage = "history-close-and-owner-close-clean-up";
+            historyButton.PerformClick(); history.Close();
+            Check(historyField.GetValue(member) == null && member.Enabled);
+            historyButton.PerformClick();
+            var replacement = (PurchaseHistoryForm)historyField.GetValue(member);
+            Check(replacement != null && !ReferenceEquals(replacement, history));
+            member.ReturnToMemberView(); member.Close();
+            Check(replacement.IsDisposed);
         }
     }
 

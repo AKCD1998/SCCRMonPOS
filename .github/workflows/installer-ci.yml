@@ -1,0 +1,36 @@
+name: Signed installer
+run-name: Installer ${{ inputs.releaseId }} / ${{ inputs.desktopRunId }}
+on:
+  workflow_dispatch:
+    inputs:
+      releaseId:
+        required: true
+        type: string
+      desktopRunId:
+        required: true
+        type: string
+      sourceCommit:
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POS_RELEASE_ID: ${{ inputs.releaseId }}
+      POS_DESKTOP_RUN_ID: ${{ inputs.desktopRunId }}
+      POS_SOURCE_COMMIT: ${{ inputs.sourceCommit }}
+      DOTNET_ADD_GLOBAL_TOOLS_TO_PATH: 'false'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sourceCommit }}
+          persist-credentials: false
+      - name: Verify the draft and build its installer
+        shell: pwsh
+        run: ./tools/Build-CiInstaller.ps1

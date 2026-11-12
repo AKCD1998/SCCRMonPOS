@@ -21,6 +21,12 @@ updates the signed website catalog with the desktop announcement. Do not edit
 StockDay's version metadata or manually replace only `releases/stable.json` for
 new releases; the website follows `releases/web-catalog.json` automatically.
 
+On SCProductDev with local compilation restricted, use
+`tools/Publish-CiPosRelease.ps1` with a successful exact-master Desktop checks run.
+Windows CI builds/tests the EXE and generates Setup from the locally signed draft.
+The DPAPI signing key remains on SCProductDev; the channel changes only after
+installer signature/hash verification succeeds. See the release guide.
+
 ---
 
 ## Local Secret Setup

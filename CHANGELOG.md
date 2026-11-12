@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.26 — 2026-11-12
+
+- Open one reusable, non-modal purchase-history window so it cannot disable the
+  member/receipt form. Ctrl+Alt+Q and the new กลับหน้าสมาชิก button park read-only
+  history while preserving its query and loaded results.
+- Restore an existing edit/confirmation dialog as the interaction target instead
+  of raising its disabled owner. Do not close edits, enable disabled forms or
+  discard unsaved input. Hidden read-only history does not block fleet updates
+  or selected-member refresh; other owned windows retain their barriers.
+- Keep background history failures inline and avoid opening a dropdown while
+  the history view is hidden or inactive.
+- Add synthetic WinForms regression cases for history/sales/hotkey switching,
+  reuse, minimize, return button, real modal input, native confirmation and cleanup.
+- Allow publication from verified master CI artifacts. Compile/test and installer
+  generation run on Windows CI; the existing DPAPI publisher key stays local.
+
 ## 1.3.25 — 2026-11-12
 
 - Preserve SCCRM-first saving and explain the separate completeness check after
