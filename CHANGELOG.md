@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.24 — 2026-11-12
+
+- Refresh the native receipt again when staff confirm, preserving their selected
+  member. Never submit a cached preview if the final read fails.
+- Require a paid, valid document, all payment tenders balancing to Ada's net
+  total, and two matching header/detail/payment observations. Read the current
+  register before its archive; an unpaid live row cannot fall back to that archive.
+- Preserve Ada's final net amounts and discounts rather than reconstructing them
+  from list prices. Keep member ownership, duplicate guards and Ada-only points.
+- Bound SQL reads and use low deadlock priority without changing Ada configuration.
+  Verify actual copied receipts, late lines, final promotions, mixed tenders,
+  unstable reads and stale archive precedence before release.
+- Document the operator-only recovery of confirmed, exact-prefix receipt snapshots.
+  Retain original requests and audit revisions; never create native sales or points.
+
 ## Reconcile confirmed historical SCCRM claims — 2026-11-11
 
 - Recognize Ada customer code 0 only when its exact profile is the verified

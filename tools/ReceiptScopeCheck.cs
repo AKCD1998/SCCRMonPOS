@@ -16,7 +16,7 @@ internal static class ReceiptScopeCheck
     private static void Check(bool condition, string name) { if (!condition) throw new InvalidOperationException(name); checks++; }
     private static void Reject(Action action, string name) { bool rejected = false; try { action(); } catch { rejected = true; } Check(rejected, name); }
     private static object Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance).Invoke(target, args);
-    private static PosReceipt Receipt(string branch, string pos) => new PosReceipt { DocNo = "SYNTHETIC-" + pos, BranchCode = branch, PosCode = pos, DocType = "1", GrandTotal = 100, Items = new List<PosReceiptItem> { new PosReceiptItem { Seq = 1, ProductCode = "FIXTURE", ProductName = "Fixture", Qty = 1, NetAmount = 100, UnitPrice = 100 } } };
+    private static PosReceipt Receipt(string branch, string pos) => new PosReceipt { FinalSnapshotVerified = true, DocNo = "SYNTHETIC-" + pos, BranchCode = branch, PosCode = pos, DocType = "1", GrandTotal = 100, Items = new List<PosReceiptItem> { new PosReceiptItem { Seq = 1, ProductCode = "FIXTURE", ProductName = "Fixture", Qty = 1, NetAmount = 100, UnitPrice = 100 } } };
     private static void Offline()
     {
         var one = new ReceiptTerminalScope("001", "001"); var two = new ReceiptTerminalScope("001", "002");

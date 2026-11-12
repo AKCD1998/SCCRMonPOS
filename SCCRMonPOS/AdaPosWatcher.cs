@@ -70,6 +70,8 @@ namespace SCCRMonPOS
             new Dictionary<string, PosReceipt>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _pendingReturnCapturedAt =
             new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _paidSnapshots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _paidObservedAt = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan PendingReceiptTimeout = TimeSpan.FromMinutes(10);
 
         // ─────────────────────────────────────────────────────────────────────
@@ -156,7 +158,8 @@ namespace SCCRMonPOS
                 {
                     conn.Open();
                     EnsureSaleTables(conn);
-                    return FetchReceiptByDocNo(conn, docNo.Trim());
+                    ConfigureReceiptRead(conn);
+                    return FinalReceiptSnapshot.ReadStable(() => FetchReceiptByDocNo(conn, docNo.Trim()), () => Thread.Sleep(500));
                 }
             }
             catch { return null; }
@@ -170,20 +173,22 @@ namespace SCCRMonPOS
                 string sql = @"
                     SELECT h.FTShdDocNo, h.FTShdDocType, h.FTBchCode, h.FTPosCode, h.FTUsrCode,
                            h.FDShdDocDate, h.FTShdDocTime, h.FDDateIns, h.FTTimeIns,
-                           h.FCShdGrand, h.FCShdDis, h.FCShdMnyCsh, h.FCShdChn,
+                           h.FCShdGrand, h.FCShdDis, h.FCShdRnd, h.FCShdMnyCsh, h.FCShdChn, h.FTShdStaPaid, h.FTShdStaDoc,
                            h.FTShdStaRefund, h.FTShdPosCN
                     FROM   " + set.HeaderTable + @" h
                     WHERE  h.FTShdDocNo = @docNo
-                       AND h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos
-                       AND h.FTShdStaPaid = '3'";
+                       AND h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos";
 
                 using (var cmd = new SqlCommand(sql, conn))
                 {
+                    cmd.CommandTimeout = 3;
                     _terminal.AddParameters(cmd);
                     cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = docNo;
                     using (var r = cmd.ExecuteReader())
                     {
                         if (!r.Read()) continue;
+                        // An unpaid/void live row must not fall back to an older paid archive.
+                        if (Str(r, "FTShdStaPaid") != "3" || Str(r, "FTShdStaDoc") != "1") return null;
                         string docType = Str(r, "FTShdDocType");
                         var receipt = new PosReceipt
                         {
@@ -199,6 +204,9 @@ namespace SCCRMonPOS
                             InsertTime    = Str(r,  "FTTimeIns"),
                             GrandTotal    = Dec(r,  "FCShdGrand"),
                             Discount      = Dec(r,  "FCShdDis"),
+                            Rounding = Dec(r, "FCShdRnd"),
+                            PaidStatus = Str(r, "FTShdStaPaid"),
+                            DocumentStatus = Str(r, "FTShdStaDoc"),
                             CashAmount    = Dec(r,  "FCShdMnyCsh"),
                             ChangeGiven   = Dec(r,  "FCShdChn"),
                             OriginalDocNo = Str(r,  "FTShdPosCN"),
@@ -207,8 +215,8 @@ namespace SCCRMonPOS
                             PaymentTable  = set.PaymentTable
                         };
                         r.Close();
-                        try { FetchLineItems(conn, receipt); } catch { }
-                        try { FetchPayment(conn, receipt); }   catch { }
+                        FetchLineItems(conn, receipt);
+                        FetchPayment(conn, receipt);
                         return receipt;
                     }
                 }
@@ -223,22 +231,19 @@ namespace SCCRMonPOS
         public bool TryRefetchLineItems(PosReceipt receipt)
         {
             if (!OwnsReceipt(receipt)) return false;
-            try
-            {
-                string connStr = ResolveConnectionString();
-                using (var conn = new SqlConnection(connStr))
-                {
-                    conn.Open();
-                    RefreshReceiptHeader(conn, receipt);
-                    receipt.Items.Clear();
-                    FetchLineItems(conn, receipt);
-                    return receipt.GrandTotal > 0 && receipt.Items != null && receipt.Items.Count > 0;
-                }
-            }
-            catch
-            {
-                return false;
-            }
+            var final = LoadReceiptByDocNo(receipt.DocNo);
+            if (final == null) return false;
+            receipt.Items = final.Items; receipt.Payments = final.Payments;
+            receipt.GrandTotal = final.GrandTotal; receipt.Discount = final.Discount; receipt.Rounding = final.Rounding;
+            receipt.PaidStatus = final.PaidStatus; receipt.DocumentStatus = final.DocumentStatus;
+            receipt.DocDate = final.DocDate; receipt.DocTime = final.DocTime;
+            receipt.FinalSnapshotVerified = true;
+            return true;
+        }
+
+        private static void ConfigureReceiptRead(SqlConnection conn)
+        {
+            using (var cmd = new SqlCommand("SET LOCK_TIMEOUT 750; SET DEADLOCK_PRIORITY LOW", conn)) { cmd.CommandTimeout = 3; cmd.ExecuteNonQuery(); }
         }
 
         // ── Poll loop ─────────────────────────────────────────────────────────
@@ -278,9 +283,13 @@ namespace SCCRMonPOS
         private void PollOnce()
         {
             if (_terminal == null) throw new InvalidOperationException("ยังไม่กำหนดเครื่องขายสำหรับอ่านบิล");
+            // These are observations, not durable jobs. Bound their memory;
+            // clearing them safely requires another stable pair on the next poll.
+            if (_paidSnapshots.Count > 512) { _paidSnapshots.Clear(); _paidObservedAt.Clear(); }
             using (var conn = new SqlConnection(ResolveConnectionString()))
             {
                 conn.Open();
+                ConfigureReceiptRead(conn);
                 EnsureSaleTables(conn);
 
                 // Re-check receipts that were incomplete (GrandTotal=0 or no items) on a previous poll.
@@ -314,11 +323,12 @@ namespace SCCRMonPOS
                         continue;
                     }
 
-                    try { FetchLineItems(conn, receipt); }
-                    catch (Exception ex) { RaiseDiagnostic("Line-item fetch failed for " + receipt.DocNo + ": " + ex.Message); }
-
-                    try { FetchPayment(conn, receipt); }
-                    catch (Exception ex) { RaiseDiagnostic("Payment fetch failed for " + receipt.DocNo + ": " + ex.Message); }
+                    try { FetchLineItems(conn, receipt); FetchPayment(conn, receipt); }
+                    catch (Exception ex) {
+                        // A partial SELECT is never a complete observation.
+                        receipt.Payments.Clear();
+                        RaiseDiagnostic("Receipt observation failed for " + receipt.DocNo + ": " + ex.Message);
+                    }
 
                     if (IsReceiptComplete(receipt))
                     {
@@ -425,9 +435,19 @@ namespace SCCRMonPOS
             }
         }
 
-        private static bool IsReceiptComplete(PosReceipt receipt)
+        private bool IsReceiptComplete(PosReceipt receipt)
         {
-            return receipt.GrandTotal > 0 && receipt.Items.Count > 0;
+            string current = FinalReceiptSnapshot.Fingerprint(receipt), previous;
+            bool stable = current != null && _paidSnapshots.TryGetValue(receipt.DocNo, out previous) && current == previous;
+            DateTime observed;
+            if (stable) stable = _paidObservedAt.TryGetValue(receipt.DocNo, out observed) && DateTime.UtcNow - observed >= TimeSpan.FromMilliseconds(500);
+            if (current == null) { _paidSnapshots.Remove(receipt.DocNo); _paidObservedAt.Remove(receipt.DocNo); }
+            else {
+                if (!_paidSnapshots.TryGetValue(receipt.DocNo, out previous) || current != previous) _paidObservedAt[receipt.DocNo] = DateTime.UtcNow;
+                _paidSnapshots[receipt.DocNo] = current;
+            }
+            receipt.FinalSnapshotVerified = stable;
+            return stable;
         }
 
         private string ResolveConnectionString()
@@ -620,6 +640,8 @@ namespace SCCRMonPOS
             if (_terminal == null) throw new InvalidOperationException("ยังไม่กำหนดเครื่องขายสำหรับอ่านบิล");
             _saleTableSets = DiscoverSaleTableSets(conn);
             _saleTableSets.RemoveAll(set => !string.IsNullOrEmpty(set.PosCode) && set.PosCode != _terminal.PosCode);
+            // Prefer this register's live table over a separately copied archive.
+            _saleTableSets.Sort((a,b) => string.IsNullOrEmpty(a.PosCode).CompareTo(string.IsNullOrEmpty(b.PosCode)));
             RaiseDiagnostic("Sale tables: " + DescribeTableSets(_saleTableSets));
         }
 
@@ -712,6 +734,10 @@ namespace SCCRMonPOS
             var sqlParts = new List<string>();
             foreach (SaleTableSet set in _saleTableSets)
             {
+                var live = _saleTableSets.Find(s => s.PosCode == _terminal.PosCode);
+                string archiveGuard = set.HeaderTable == "TPSTSalHD" && live != null
+                    ? " AND NOT EXISTS (SELECT 1 FROM " + live.HeaderTable + " currentSale WHERE currentSale.FTBchCode=h.FTBchCode AND currentSale.FTPosCode=h.FTPosCode AND currentSale.FTShdDocNo=h.FTShdDocNo)"
+                    : "";
                 sqlParts.Add(@"
                 SELECT '" + set.HeaderTable + @"' AS SourceHeaderTable,
                        '" + set.DetailTable + @"' AS SourceDetailTable,
@@ -720,12 +746,12 @@ namespace SCCRMonPOS
                        h.FTPosCode,     h.FTUsrCode,
                        h.FDShdDocDate,  h.FTShdDocTime,
                        h.FDDateIns,     h.FTTimeIns,
-                       h.FCShdGrand,    h.FCShdDis,
+                       h.FCShdGrand, h.FCShdDis, h.FCShdRnd, h.FTShdStaPaid, h.FTShdStaDoc,
                        h.FCShdMnyCsh,   h.FCShdChn,
                        h.FTShdStaRefund, h.FTShdPosCN
                 FROM   " + set.HeaderTable + @" h
                 WHERE h.FTBchCode = @receiptBranch AND h.FTPosCode = @receiptPos
-                  AND h.FTShdStaPaid = '3'");
+                  AND h.FTShdStaPaid = '3' AND h.FTShdStaDoc = '1'" + archiveGuard);
             }
 
             string sql = @"
@@ -741,6 +767,7 @@ namespace SCCRMonPOS
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                cmd.CommandTimeout = 3;
                 _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@ld", SqlDbType.DateTime).Value   = _watermark.InsertDate;
                 cmd.Parameters.Add("@lt", SqlDbType.VarChar, 8).Value = _watermark.InsertTime ?? "";
@@ -766,6 +793,9 @@ namespace SCCRMonPOS
                             InsertTime    = Str(r,  "FTTimeIns"),
                             GrandTotal    = Dec(r,  "FCShdGrand"),
                             Discount      = Dec(r,  "FCShdDis"),
+                            Rounding = Dec(r, "FCShdRnd"),
+                            PaidStatus = Str(r, "FTShdStaPaid"),
+                            DocumentStatus = Str(r, "FTShdStaDoc"),
                             CashAmount    = Dec(r,  "FCShdMnyCsh"),
                             ChangeGiven   = Dec(r,  "FCShdChn"),
                             OriginalDocNo = Str(r,  "FTShdPosCN"),
@@ -775,6 +805,9 @@ namespace SCCRMonPOS
                         });
                     }
                 }
+                var activeDocs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var receipt in list) if (receipt.HeaderTable == "TSHD" + receipt.PosCode) activeDocs.Add(receipt.DocNo);
+                list.RemoveAll(receipt => receipt.HeaderTable == "TPSTSalHD" && activeDocs.Contains(receipt.DocNo));
                 return list;
             }
         }
@@ -785,12 +818,13 @@ namespace SCCRMonPOS
         {
             _terminal.Require(receipt);
             string sql = @"
-                SELECT FCShdGrand, FCShdDis, FCShdMnyCsh, FCShdChn
+                SELECT FCShdGrand, FCShdDis, FCShdRnd, FCShdMnyCsh, FCShdChn, FTShdStaPaid, FTShdStaDoc
                 FROM   " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @"
                 WHERE  FTShdDocNo = @docNo AND FTBchCode = @receiptBranch AND FTPosCode = @receiptPos";
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                cmd.CommandTimeout = 3;
                 _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
@@ -799,6 +833,9 @@ namespace SCCRMonPOS
                     {
                         receipt.GrandTotal  = Dec(r, "FCShdGrand");
                         receipt.Discount    = Dec(r, "FCShdDis");
+                        receipt.Rounding = Dec(r, "FCShdRnd");
+                        receipt.PaidStatus = Str(r, "FTShdStaPaid");
+                        receipt.DocumentStatus = Str(r, "FTShdStaDoc");
                         receipt.CashAmount  = Dec(r, "FCShdMnyCsh");
                         receipt.ChangeGiven = Dec(r, "FCShdChn");
                     }
@@ -818,6 +855,7 @@ namespace SCCRMonPOS
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                cmd.CommandTimeout = 3;
                 _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
@@ -850,6 +888,7 @@ namespace SCCRMonPOS
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                cmd.CommandTimeout = 3;
                 _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
@@ -881,7 +920,7 @@ namespace SCCRMonPOS
         {
             _terminal.Require(receipt);
             string sql = @"
-                SELECT TOP 1 p.FTRcvCode, p.FTRcvName, p.FTSrcRef
+                SELECT p.FNSrcSeqNo, p.FTRcvCode, p.FTRcvName, p.FTSrcRef, p.FCSrcAmt, p.FCSrcNet, p.FCSrcChg
                 FROM   " + GetSafeTableName(receipt.PaymentTable, "TPSTSalRC") + @" p
                 WHERE  p.FTShdDocNo = @docNo
                   AND EXISTS (SELECT 1 FROM " + GetSafeTableName(receipt.HeaderTable, "TPSTSalHD") + @" h
@@ -890,15 +929,19 @@ namespace SCCRMonPOS
 
             using (var cmd = new SqlCommand(sql, conn))
             {
+                cmd.CommandTimeout = 3;
                 _terminal.AddParameters(cmd);
                 cmd.Parameters.Add("@docNo", SqlDbType.VarChar, 50).Value = receipt.DocNo;
                 using (var r = cmd.ExecuteReader())
                 {
-                    if (r.Read())
+                    receipt.Payments.Clear();
+                    while (r.Read())
                     {
-                        receipt.PaymentCode  = Str(r, "FTRcvCode");
-                        receipt.PaymentName  = Str(r, "FTRcvName");
-                        receipt.PromptPayRef = Str(r, "FTSrcRef");
+                        if (receipt.Payments.Count == 0) {
+                            receipt.PaymentCode = Str(r, "FTRcvCode"); receipt.PaymentName = Str(r, "FTRcvName"); receipt.PromptPayRef = Str(r, "FTSrcRef");
+                        }
+                        receipt.Payments.Add(new PosReceiptPayment {Seq=Convert.ToInt64(r["FNSrcSeqNo"]),Code=Str(r,"FTRcvCode"),
+                            Amount=Dec(r,"FCSrcAmt"),NetAmount=Dec(r,"FCSrcNet"),Change=Dec(r,"FCSrcChg")});
                     }
                 }
             }
