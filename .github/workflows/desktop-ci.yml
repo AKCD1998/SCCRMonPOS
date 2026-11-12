@@ -10,6 +10,9 @@ permissions:
 jobs:
   desktop:
     runs-on: windows-latest
+    env:
+      DOTNET_ADD_GLOBAL_TOOLS_TO_PATH: 'false'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
@@ -54,3 +57,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           msbuild tools/FleetConsole.csproj /t:Build /p:Configuration=Release /nologo /v:minimal
           exit $LASTEXITCODE
+      - name: Package the checked release candidate
+        shell: pwsh
+        run: |
+          $package='build-verify/ci-package'
+          New-Item -ItemType Directory -Path "$package/release" -Force | Out-Null
+          Copy-Item SCCRMonPOS/bin/Release/SCCRMonPOS.exe "$package/release/SCCRMonPOS.exe"
+          Copy-Item build-verify/desktop-feature-check "$package/verifier" -Recurse
+          @{commit=(git rev-parse HEAD);runId=$env:GITHUB_RUN_ID;sha256=(Get-FileHash "$package/release/SCCRMonPOS.exe" -Algorithm SHA256).Hash.ToLowerInvariant();version=(Get-Item "$package/release/SCCRMonPOS.exe").VersionInfo.FileVersion}|ConvertTo-Json|Set-Content "$package/provenance.json" -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pos-desktop-${{ github.sha }}
+          path: build-verify/ci-package/
+          retention-days: 14

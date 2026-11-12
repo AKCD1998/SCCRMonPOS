@@ -46,3 +46,22 @@ files together. The normal publisher requires a clean checkout, so do not call
 its rollback path while these recovery files are still uncommitted. If the
 announcement commit already exists and only its push failed, inspect/fetch the
 remote and push the existing commit instead of generating another release.
+# Publication without a local compiler
+
+After the reviewed PR merges, wait for the **Desktop checks** push run on that
+exact master commit. It uploads the tested EXE/verifier and source/hash provenance.
+From clean master on SCProductDev, run:
+
+```powershell
+./tools/Publish-CiPosRelease.ps1 -ReleaseId pos-1.3.26 -Version 1.3.26 -CiRunId <successful-master-run-id> -NotesFile ./releases/pos-1.3.26-notes.md -KeyPath <existing-protected-signing-key>
+```
+
+This path never invokes a local compiler or a downloaded test EXE. It validates
+the CI run, source commit, binary hash and version, signs with the existing DPAPI
+key locally, and creates a draft. The manually dispatched Windows installer job
+validates the same artifact and signature, uses the pinned official Inno Setup
+6.7.3 download, and uploads Setup/hash. Only after that job succeeds does the
+publisher expose the release and update both signed announcements. No private
+publisher key goes to GitHub. A failure retains the draft and staging evidence;
+inspect them before retrying. Existing fleet save barriers and rollback remain.
+

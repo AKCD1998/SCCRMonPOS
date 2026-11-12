@@ -42,6 +42,8 @@ namespace SCCRMonPOS
         private int _historyGeneration;
         private int _searchGeneration;
         private bool _loadingPage;
+        internal event EventHandler ReturnToMemberRequested;
+        internal Task ShowMemberAsync(string memberId, string memberName) { return LoadHistoryAsync(memberId, memberName); }
 
         public PurchaseHistoryForm(ApiClient api, string memberId = null, string memberName = null)
         {
@@ -80,6 +82,15 @@ namespace SCCRMonPOS
                 Height    = 30,
                 Padding   = new Padding(10, 6, 0, 0)
             };
+            var titleRow = new Panel { Dock = DockStyle.Top, Height = 34 };
+            lblTitle.Dock = DockStyle.Fill;
+            var back = new Button { Name = "backToMember", Text = "กลับหน้าสมาชิก", Dock = DockStyle.Right, Width = 142 };
+            back.Click += (s, e) => {
+                if (ReturnToMemberRequested != null) ReturnToMemberRequested(this, EventArgs.Empty);
+                else Close();
+            };
+            titleRow.Controls.Add(lblTitle);
+            titleRow.Controls.Add(back);
 
             // Search row laid out by a TableLayoutPanel so it stretches with the
             // form and never overflows the right edge.
@@ -208,7 +219,7 @@ namespace SCCRMonPOS
             Controls.Add(_lblStatus);
             Controls.Add(_lblMember);
             Controls.Add(searchRow);
-            Controls.Add(lblTitle);
+            Controls.Add(titleRow);
         }
 
         private static DataGridViewCellStyle RightAlign()
@@ -255,15 +266,14 @@ namespace SCCRMonPOS
                 else
                 {
                     _lblStatus.Text = "พบ " + results.Length + " คน — เลือกจากรายการด้านขวา";
-                    _cboResults.DroppedDown = true;
+                    if (Visible && ContainsFocus) _cboResults.DroppedDown = true;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 if (IsDisposed || generation != _searchGeneration) return;
                 _lblStatus.ForeColor = Color.Firebrick;
-                _lblStatus.Text = "ค้นหาไม่สำเร็จ";
-                MessageBox.Show(this, ex.Message, "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _lblStatus.Text = "ค้นหาไม่สำเร็จ กรุณากดค้นหาอีกครั้ง";
             }
             finally
             {
@@ -356,12 +366,11 @@ namespace SCCRMonPOS
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 if (IsDisposed || generation != _historyGeneration) return;
                 _lblStatus.ForeColor = Color.Firebrick;
-                _lblStatus.Text = "โหลดประวัติไม่สำเร็จ";
-                MessageBox.Show(this, ex.Message, "SCCRM", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _lblStatus.Text = "โหลดประวัติไม่สำเร็จ กรุณาค้นหาสมาชิกอีกครั้ง";
             }
             finally
             {

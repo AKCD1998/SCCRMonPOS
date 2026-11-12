@@ -194,6 +194,41 @@ namespace SCCRMonPOS
                 if (IsOurWindow(window, root.ThreadId)) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x413);
         }
 
+        // Explicit cashier action only. Never raise a disabled owner over the
+        // dialog that disabled it, and never enable/close an unsaved edit.
+        internal static IntPtr InteractionTarget(Form form)
+        {
+            foreach (Form child in form.OwnedForms)
+                if (!child.IsDisposed && child.Visible && child.Modal) return InteractionTarget(child);
+            foreach (Form child in form.OwnedForms)
+                if (!child.IsDisposed && child.Visible && !IsWindowEnabled(child.Handle)) {
+                    IntPtr ownedTarget = InteractionTarget(child);
+                    if (ownedTarget != IntPtr.Zero) return ownedTarget;
+                }
+            IntPtr target = form.Handle;
+            uint process; uint thread = GetWindowThreadProcessId(target, out process);
+            for (int n = 0; n < 32 && !IsWindowEnabled(target); n++) {
+                // Unlike GetLastActivePopup, GW_ENABLEDPOPUP also works when
+                // the disabled owner is itself an owned edit dialog.
+                IntPtr popup = GetWindow(target, 6); uint popupProcess;
+                if (popup == target || popup == IntPtr.Zero || !IsWindowVisible(popup) ||
+                    GetWindowThreadProcessId(popup, out popupProcess) != thread || popupProcess != process) return IntPtr.Zero;
+                target = popup;
+            }
+            return IsWindowEnabled(target) ? target : IntPtr.Zero;
+        }
+
+        internal static void ActivateForInteraction(Form form)
+        {
+            if (form.IsDisposed) return;
+            if (IsIconic(form.Handle)) ShowWindow(form.Handle, 9); // restore prior normal/maximized placement
+            IntPtr target = InteractionTarget(form);
+            if (target == IntPtr.Zero) return;
+            if (IsIconic(target)) ShowWindow(target, 9);
+            SetWindowPos(target, IntPtr.Zero, 0, 0, 0, 0, 0x3); // TOP, preserve size/location
+            SetForegroundWindow(target);
+        }
+
         public void Dispose()
         {
             _stop = true;
@@ -240,6 +275,9 @@ namespace SCCRMonPOS
         [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr window);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     }
 }
