@@ -31,9 +31,9 @@ async function run(action){old.owner();noLink(remote);noLink(path.join(remote,'r
   const after=branches.map(old.snapshot);assert.deepEqual(after,before.customers);assert.deepEqual(sample(),before.sample);
   const r={ok:true,commit,readerHash:p.readerHash,result,customersAndFinancialRowsUnchanged:true};fs.writeFileSync(path.join(copy.ROOT,'live-reader-install.json'),JSON.stringify(r,null,2));return r;
  }
- if(action==='stage-worker'){
+ if(action==='stage-worker'||action==='refresh-worker'){
   const commit=committed(),proof=read('live-reader-install.json');assert(proof.ok&&proof.result.length===5);proofs();
-  const backup=path.join(remote,'runtime','completeness-backup-20261112');noLink(backup);assert(!fs.existsSync(backup),'Backup already exists; inspect before repeating');fs.mkdirSync(backup);
+  const backup=path.join(remote,'runtime',action==='stage-worker'?'completeness-backup-20261112':'completeness-refresh-'+commit.slice(0,12));noLink(backup);assert(!fs.existsSync(backup),'Backup already exists; inspect before repeating');fs.mkdirSync(backup);
   const originals=[...files.filter(f=>fs.existsSync(path.join(remote,f))),'config.json','.receipt-service-owner.json','package-manifest.json'];
   for(const f of originals){noLink(path.join(remote,f));fs.copyFileSync(path.join(remote,f),path.join(backup,f));}
   old.sc('stop');await waitStopped();

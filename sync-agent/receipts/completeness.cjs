@@ -18,7 +18,7 @@ async function stableRead(target,credentials,job,{reader=read,pause=()=>new Prom
 function createReconciler({api,targets,credentials,reader=stableRead,onStatus=()=>{},stopping=()=>false,sleep=ms=>new Promise(r=>setTimeout(r,ms))}){
  let stop=false;const statuses=new Map();
  async function cycle(branch){let job;try{
-  job=(await api('completeness-lease',{originBranch:branch,policy:POLICY})).job;if(!job)return;
+  job=(await api('completeness-lease',{originBranch:branch,policy:POLICY})).job;if(!job){statuses.set(branch,{at:new Date().toISOString(),state:'idle',code:'RECON_NO_DUE_JOB'});try{onStatus({policy:POLICY,branches:[...statuses].map(([branch,value])=>({branch,...value}))});}catch{}return;}
   if(job.policy!==POLICY||job.identity?.branchCode!==branch)throw Error('RECON_SOURCE_UNAVAILABLE');
   let packet={id:job.id,leaseToken:job.leaseToken,baselineHash:job.baselineHash,policy:POLICY};
   try{packet.source=await reader(targets.find(t=>t.branch===branch),credentials[branch],job);packet.hq=await reader(targets.find(t=>t.branch==='000'),credentials['000'],job);}

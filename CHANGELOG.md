@@ -13,6 +13,8 @@
   preserved customer/sale/point rows and non-blocking offline branches.
 - Document committed native-copy replay and exact cleanup of test-owned copy
   operations before comparing preserved original data.
+- Clear stale connection-error telemetry after a successful empty queue poll,
+  and preserve a separate backup when refreshing the owned receipt worker.
 
 ## 1.3.24 — 2026-11-12
 
