@@ -4,7 +4,8 @@ param(
  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
  [Parameter(Mandatory)][ValidatePattern('^\d+$')][string]$CiRunId,
  [Parameter(Mandatory)][string]$NotesFile,
- [Parameter(Mandatory)][string]$KeyPath
+ [Parameter(Mandatory)][string]$KeyPath,
+ [switch]$ResumeDraft
 )
 $ErrorActionPreference='Stop';Add-Type -AssemblyName System.Security
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'));$repo='AKCD1998/SCCRMonPOS'
@@ -35,7 +36,14 @@ try {
   $envelope=@{payload=[Convert]::ToBase64String($bytes);signature=[Convert]::ToBase64String($signature)}|ConvertTo-Json -Compress
  } finally {[Array]::Clear($private,0,$private.Length);$signer.Dispose()}
  $manifest=Join-Path $stage 'stable.json';[IO.File]::WriteAllText($manifest,$envelope,[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText(($stage+'/notes.md'),$notes,[Text.UTF8Encoding]::new($false))
- $null=Invoke-CiPublishGh @('release','create',$ReleaseId,'--repo',$repo,'--draft','--target',$commit,'--title',('SCCRMonPOS '+$Version),'--notes-file',($stage+'/notes.md'),$exe,$manifest)
+ if($ResumeDraft) {
+  $draft=Invoke-CiPublishGh @('release','view',$ReleaseId,'--repo',$repo,'--json','isDraft')|ConvertFrom-Json
+  if(!$draft.isDraft){throw 'Resume may only replace an unpublished draft'}
+  $null=Invoke-CiPublishGh @('release','edit',$ReleaseId,'--repo',$repo,'--target',$commit,'--title',('SCCRMonPOS '+$Version),'--notes-file',($stage+'/notes.md'))
+  $null=Invoke-CiPublishGh @('release','upload',$ReleaseId,'--repo',$repo,'--clobber',$exe,$manifest)
+ } else {
+  $null=Invoke-CiPublishGh @('release','create',$ReleaseId,'--repo',$repo,'--draft','--target',$commit,'--title',('SCCRMonPOS '+$Version),'--notes-file',($stage+'/notes.md'),$exe,$manifest)
+ }
  $null=Invoke-CiPublishGh @('workflow','run','installer-ci.yml','--repo',$repo,'-f',('releaseId='+$ReleaseId),'-f',('desktopRunId='+$CiRunId),'-f',('sourceCommit='+$commit))
  $title='Installer '+$ReleaseId+' / '+$CiRunId;$installerRun=$null
  for($n=0;$n -lt 18 -and !$installerRun;$n++) {

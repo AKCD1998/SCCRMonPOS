@@ -63,5 +63,7 @@ validates the same artifact and signature, uses the pinned official Inno Setup
 6.7.3 download, and uploads Setup/hash. Only after that job succeeds does the
 publisher expose the release and update both signed announcements. No private
 publisher key goes to GitHub. A failure retains the draft and staging evidence;
-inspect them before retrying. Existing fleet save barriers and rollback remain.
-
+inspect them before retrying. `-ResumeDraft` may replace candidate assets only
+after verifying that the release is still an unpublished draft; preserve the
+prior staging evidence first. Published releases cannot use that path.
+Existing fleet save barriers and rollback remain.
