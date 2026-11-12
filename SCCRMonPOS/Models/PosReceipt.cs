@@ -19,6 +19,12 @@ namespace SCCRMonPOS.Models
         [DataMember] public string InsertTime { get; set; }
         [DataMember] public decimal GrandTotal { get; set; }
         [DataMember] public decimal Discount { get; set; }
+        [DataMember] public decimal Rounding { get; set; }
+        [DataMember] public string PaidStatus { get; set; }
+        [DataMember] public string DocumentStatus { get; set; }
+        [DataMember] public List<PosReceiptPayment> Payments { get; set; }
+        // A deserialized, older snapshot never carries verification trust.
+        internal bool FinalSnapshotVerified { get; set; }
         [DataMember] public decimal CashAmount { get; set; }
         [DataMember] public decimal ChangeGiven { get; set; }
         [DataMember] public string PaymentCode { get; set; }
@@ -33,7 +39,18 @@ namespace SCCRMonPOS.Models
         public PosReceipt()
         {
             Items = new List<PosReceiptItem>();
+            Payments = new List<PosReceiptPayment>();
         }
+    }
+
+    [DataContract]
+    public class PosReceiptPayment
+    {
+        [DataMember] public long Seq { get; set; }
+        [DataMember] public string Code { get; set; }
+        [DataMember] public decimal Amount { get; set; }
+        [DataMember] public decimal NetAmount { get; set; }
+        [DataMember] public decimal Change { get; set; }
     }
 
     [DataContract]

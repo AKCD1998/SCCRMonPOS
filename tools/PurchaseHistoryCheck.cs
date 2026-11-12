@@ -48,7 +48,7 @@ internal static class PurchaseHistoryCheck
     {
         var r=new PosReceipt { DocNo=i.ReceiptPrefix+suffix,DocType="1",BranchCode=i.BranchCode,PosCode="TEST-POS",CashierCode="TEST-CASHIER",DocDate=DateTime.Today,DocTime="10:11:12",GrandTotal=drugOnly?100m:340m,Discount=drugOnly?0m:10m };
         if(!drugOnly)r.Items.Add(new PosReceiptItem { Seq=3,ProductCode="TEST-VIT",ProductName="วิตามิน fixture",Barcode="SYNTHETIC-BC",Qty=2,UnitPrice=130m,NetAmount=250m,LineDiscount=10m,PromotionCode="TEST-PROMO" });
-        r.Items.Add(new PosReceiptItem { Seq=5,ProductCode="TEST-DRUG",ProductName="เภสัช fixture",Barcode="SYNTHETIC-DRUG",UnitCode="BOX",UnitName="กล่อง",Qty=1,UnitPrice=100m,NetAmount=100m });return r;
+        r.Items.Add(new PosReceiptItem { Seq=5,ProductCode="TEST-DRUG",ProductName="เภสัช fixture",Barcode="SYNTHETIC-DRUG",UnitCode="BOX",UnitName="กล่อง",Qty=1,UnitPrice=100m,NetAmount=100m });r.FinalSnapshotVerified=true;return r;
     }
     private static void Capture(Form form,string path)
     {
@@ -61,6 +61,7 @@ internal static class PurchaseHistoryCheck
         using(var watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope(input.BranchCode,"TEST-POS")))
         using(var form=new MemberClaimForm(api,watcher,25,"synthetic-history-test",Receipt(input,suffix,drugOnly),display))
         {
+            form.ReadFinalReceipt=doc=>Receipt(input,suffix,drugOnly);
             ShowOffscreen(form);
             Field<TextBox>(form,"_txtMemberSearch").Text=phone;
             Field<Button>(form,"_btnSearch").PerformClick();

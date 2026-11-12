@@ -11,6 +11,7 @@ namespace SCCRMonPOS
     {
         private readonly ApiClient _api;
         private readonly AdaPosWatcher _watcher;
+        internal Func<string, PosReceipt> ReadFinalReceipt;
         private readonly int _bahtPerPoint;
         private readonly string _staffCode;
         private readonly CustomerDisplayController _customerDisplay;
@@ -68,6 +69,7 @@ namespace SCCRMonPOS
         {
             _api          = api;
             _watcher      = watcher;
+            ReadFinalReceipt = doc => _watcher?.LoadReceiptByDocNo(doc);
             _bahtPerPoint = bahtPerPoint > 0 ? bahtPerPoint : 10;
             _staffCode    = staffCode ?? "";
             _ownsCustomerDisplay = customerDisplay == null;
@@ -737,6 +739,23 @@ namespace SCCRMonPOS
                     SetStatus(_receiptStatusVerified ? "บิลนี้บันทึกให้สมาชิกแล้ว" : "ตรวจสถานะบิลไม่ได้ กรุณากดโหลดบิลเพื่อลองใหม่", !_receiptStatusVerified);
                     return;
                 }
+                var loaded = _receipt;
+                SetStatus("กำลังตรวจรายการและยอดสุดท้ายจาก Ada...", false, Color.DimGray);
+                var finalReceipt = await Task.Run(() => ReadFinalReceipt(loaded.DocNo));
+                if (IsDisposed) return;
+                if (finalReceipt == null || !finalReceipt.FinalSnapshotVerified || !_watcher.OwnsReceipt(finalReceipt)
+                    || finalReceipt.DocNo != loaded.DocNo || finalReceipt.DocType != "1") {
+                    SetStatus("Ada ยังส่งข้อมูลบิลไม่ครบ หรือเชื่อมต่อไม่ได้ กรุณาลองบันทึกอีกครั้ง ข้อมูลสมาชิกยังอยู่", true);
+                    return;
+                }
+                _receipt = finalReceipt;
+                PopulateItemsList(finalReceipt);
+                InvalidateReceiptClaimStatus();
+                await RefreshReceiptClaimStatusAsync();
+                if (!_receiptStatusVerified || _receiptClaimStatus?.Claimed != false) {
+                    SetStatus(_receiptStatusVerified ? "บิลนี้บันทึกให้สมาชิกแล้ว" : "ตรวจสถานะบิลไม่ได้ กรุณาลองอีกครั้ง", true);
+                    return;
+                }
                 response = await _api.SubmitLoyaltyClaimAsync(BuildClaimRequest());
             }
             catch (ApiException ex)
@@ -776,6 +795,8 @@ namespace SCCRMonPOS
         {
             if (_watcher == null || !_watcher.OwnsReceipt(_receipt))
                 throw new InvalidOperationException("บิลไม่ตรงกับสาขา / เครื่องขายนี้ จึงบันทึกให้สมาชิกไม่ได้");
+            if (!_receipt.FinalSnapshotVerified)
+                throw new InvalidOperationException("ต้องตรวจข้อมูลบิลสุดท้ายจาก Ada ก่อนบันทึก");
             LoyaltyClaimItem[] items = new LoyaltyClaimItem[_receipt.Items != null ? _receipt.Items.Count : 0];
             if (_receipt.Items != null)
             {

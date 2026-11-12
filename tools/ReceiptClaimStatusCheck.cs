@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -83,6 +83,8 @@ internal static class ReceiptClaimStatusCheck
             Watcher=new AdaPosWatcher(null,false,new ReceiptTerminalScope("004","002"));
             Display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-status-fixture-"+Guid.NewGuid().ToString("N")));
             Form=new MemberClaimForm(api,Watcher,25,"fixture",receipt,Display) {TopMost=false,ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Location=new Point(-20000,-20000)};
+            receipt.FinalSnapshotVerified = true;
+            Form.ReadFinalReceipt = doc => { receipt.FinalSnapshotVerified=true; return receipt; };
             Form.Show(); Application.DoEvents();
         }
         public void Wait() => Pump((Task)Call(Form,"RefreshReceiptClaimStatusAsync"));
@@ -96,6 +98,7 @@ internal static class ReceiptClaimStatusCheck
     }
     private static void Run()
     {
+        FinalSnapshots();
         using(var server=new Server()) {
             Environment.SetEnvironmentVariable("SCCRMONPOS__ApiBaseUrl",server.BaseUrl);
             bool claimed=false,fail=false,race=false,malformed=false;
@@ -184,6 +187,48 @@ internal static class ReceiptClaimStatusCheck
                 Call(f.Form,"AddMemberRow",new MemberSearchResult{Id="stale-fixture",DisplayName="Unavailable fixture",CurrentPoints=null,PointsAvailable=false,PointsSource="ada",PointsStatus="stale"});
                 Call(f.Form,"SelectMemberAtRow",1);
                 Check(!f.Enabled && Field<Label>(f.Form,"_lblMemberPoints").Text.Contains(": -"),"unavailable balance stays a dash and cannot be confirmed");
+            }
+        }
+    }
+
+    private static void FinalSnapshots()
+    {
+        Func<decimal, decimal, PosReceipt> final = (total, discount) => {
+            var r=Receipt(); r.GrandTotal=total; r.Discount=discount; r.PaidStatus="3"; r.DocumentStatus="1";
+            r.Items[0].Qty=3; r.Items[0].UnitPrice=40; r.Items[0].NetAmount=120;
+            r.Payments.Add(new PosReceiptPayment {Seq=1,Code="cash",Amount=100,NetAmount=total,Change=100-total});
+            return r;
+        };
+        var draft=final(120,0); draft.Payments.Clear();
+        Check(!FinalReceiptSnapshot.IsPaid(draft),"header and first line never prove payment completion");
+        var promoted=final(90,30);
+        Check(FinalReceiptSnapshot.IsPaid(promoted),"3 x list price 40 can legitimately settle for 90; Ada owns discount");
+        int reads=0,pauses=0;
+        var latest=FinalReceiptSnapshot.ReadStable(()=>++reads==1?draft:final(90,30),()=>pauses++);
+        Check(latest!=null && latest.GrandTotal==90 && latest.Discount==30 && latest.FinalSnapshotVerified && reads==3 && pauses==2,"wait through unpaid snapshot then require two matching final observations");
+        int changing=0;
+        Check(FinalReceiptSnapshot.ReadStable(()=>final(90+(changing++),30),()=>{})==null,"bounded unstable bill is held");
+        var split=final(90,30); split.Payments[0].NetAmount=40;split.Payments.Add(new PosReceiptPayment {Seq=2,Code="transfer",Amount=50,NetAmount=50});
+        Check(FinalReceiptSnapshot.IsPaid(split),"sum every tender, using net after cash change");
+        split.DocumentStatus="2";Check(!FinalReceiptSnapshot.IsPaid(split),"non-final document remains held even with paid flag");
+        var later=final(90,30); later.Items.Add(new PosReceiptItem {Seq=2,ProductCode="ADDED",ProductName="Later row",Qty=1,UnitPrice=0,NetAmount=0});
+        Check(FinalReceiptSnapshot.Fingerprint(later)!=FinalReceiptSnapshot.Fingerprint(promoted),"late or free lines change the fingerprint even when grand total is unchanged");
+        using(var server=new Server()) {
+            Environment.SetEnvironmentVariable("SCCRMONPOS__ApiBaseUrl",server.BaseUrl);
+            string sent=null;
+            server.Respond=(path,body)=>Task.FromResult(new Reply {Json=path.StartsWith("/api/loyalty/claims/status?")?Status(false):
+                path=="/api/loyalty/claims"?(sent=body)!=null?"{\"ok\":true,\"claimId\":\"final-fixture\",\"awardedPoints\":0,\"member\":{\"newPointsBalance\":0}}":"{}":"{}"});
+            var api=new ApiClient(server.BaseUrl);api.SetStaffToken("synthetic-final-snapshot");
+            using(var f=new Fixture(api,Receipt())) {
+                f.Wait();f.Select();f.Form.ReadFinalReceipt=doc=>{var r=final(90,30);r.FinalSnapshotVerified=true;return r;};
+                Pump((Task)Call(f.Form,"ConfirmClaimAsync"));
+                Check(server.Posts==1 && sent.Contains("\"receiptTotalAmount\":90") && sent.Contains("\"receiptDiscount\":30") && sent.Contains("\"qty\":3"),"exact UI posts the freshly re-read final bill, not its cached preview");
+                Pump((Task)Call(f.Form,"ConfirmClaimAsync"));Check(server.Posts==1,"fresh receipt does not bypass the duplicate guard");
+            }
+            using(var f=new Fixture(api,Receipt())) {
+                f.Wait();f.Select();f.Form.ReadFinalReceipt=doc=>null;
+                Pump((Task)Call(f.Form,"ConfirmClaimAsync"));
+                Check(server.Posts==1 && Field<Label>(f.Form,"_lblStatus").Text.Contains("ยังส่งข้อมูลบิลไม่ครบ") && Field<MemberSearchResult>(f.Form,"_selectedMember")!=null,"failed final read does not post cached data and retains the selected member");
             }
         }
     }
