@@ -11,6 +11,8 @@
   detect later native changes and expose conflicts rather than overwriting them.
 - Validate copied real receipts end to end, repeated audits, permission boundaries,
   preserved customer/sale/point rows and non-blocking offline branches.
+- Document committed native-copy replay and exact cleanup of test-owned copy
+  operations before comparing preserved original data.
 
 ## 1.3.24 — 2026-11-12
 

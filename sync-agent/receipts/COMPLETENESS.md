@@ -55,8 +55,9 @@ the receipt identity has execute permission but no customer/sale/point UPDATE.
 It reads two actual copied cases twice at HQ and branch, and checks preserved
 non-PIN customer, financial and point rows. The paired backend end-to-end script
 executes the actual reconciliation worker against local PostgreSQL and these
-native copies, validates both corrected native requests with outer rollback,
-then audits again. Unit/integration tests cover missing units, checkout discounts,
+native copies, commits and replays both corrected native requests, then audits
+the committed owners again. It cleans up only its newly created copy journal/audit
+operations and restores those copied owner fields. Unit/integration tests cover missing units, checkout discounts,
 late/free rows, mixed tenders, conflicts, expired leases, lost responses, restart,
 subsequent native mutation, mirror-only repair and duplicate claim protection.
 
