@@ -34,3 +34,15 @@ jobs:
           cache-dependency-path: sync-agent/package-lock.json
       - run: npm ci --ignore-scripts
       - run: node --test --test-concurrency=1 live/inbound*.test.cjs live/registration-confirmation.test.cjs
+  windows-source:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse the native read transports
+        shell: pwsh
+        run: |
+          foreach ($source in @('sync-agent/live/LiveSqlRpc.ps1','sync-agent/live/Read-BranchCustomer.ps1')) {
+            $parseErrors=$null; $parseTokens=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source),[ref]$parseTokens,[ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          }

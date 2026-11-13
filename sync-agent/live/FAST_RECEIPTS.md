@@ -45,3 +45,25 @@ database. It reproduces the index permission failure under the restricted role,
 then checks idempotent customer updates, late older bills, returns, decimal
 quantities, units and repeated replay. Unit checks cover incomplete item
 snapshots, wrong owner scopes, rollback and independent bounded polling.
+
+## Profiles that have not reached HQ
+
+`20261113031659_ada_inbound_branch_customer_profiles.sql` adds a separate
+private branch-profile cache and a shared customer read view. The operator
+reader obtains only six non-PIN customer fields and the exact paid receipt
+header from the originating branch. The destination requires that header to
+match the already mirrored HQ branch, POS, document, owner, date, time and total.
+Only a branch's own AR code is accepted. A name, phone or point entry cannot
+establish ownership. The bootstrap reader is an explicit operator action,
+not a service that retains administrator credentials.
+
+StockDay's existing directory/history views can then show that code's history
+without creating an account, approved member link or native HQ customer. The
+profile records `branchNNN/AdaAcc` as physical provenance. The directory ID stays
+stable if the exact code subsequently arrives from HQ; the real HQ profile
+always takes precedence. Registration matching still uses the actual HQ
+customer table and cannot silently consolidate this fallback contact.
+
+Monitor historical missing profiles as well as the recent window. A branch-only
+profile requires this exact-source repair; it must not be hidden under a
+different SCCRM member merely because a phone or name agrees.

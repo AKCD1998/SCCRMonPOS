@@ -79,5 +79,33 @@ test('restricted inbound customer updates survive the private expression-index n
    assert.ok((await admin.query('SELECT quantity,unit_name FROM ada_history.lines')).rows.every(r => Number(r.quantity) === 3.5 && r.unit_name === 'Synthetic unit'));
    assert.equal((await run()).written, 0);
   });
+  await t.test('a verified branch-only profile reveals its own orphan bill and yields to the exact HQ profile', async () => {
+   await admin.query(fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20261113031659_ada_inbound_branch_customer_profiles.sql'), 'utf8'));
+   const branchCustomer = { FTCstCode: 'AR003-000099', FTCstName: 'Synthetic branch-only member', FTCstTel: '0990000099', FTBchCode: '003', FTCstStaActive: '1' };
+   const header = { FTShdDocNo: 'S2611003001-0000099', FDShdDocDate: '2026-11-10T00:00:00.000', FTShdDocTime: '14:00:00', FTBchCode: '003', FTPosCode: '001', FTShdDocType: '1', FTShdStaPaid: '3', FTCstCode: branchCustomer.FTCstCode, FCShdGrand: '123.45' };
+   const receipt = record('receipts', header);
+   await apply(worker, 'receipts', [receipt], snapshot, header.FTShdDocNo);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.purchase_claims WHERE receipt_no=$1', [header.FTShdDocNo])).rows[0].n, 0);
+   const importProfile = (customer = branchCustomer, proof = header) => worker.query('SELECT ada_history.apply_branch_customer_profile($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb) n', [MARKER, SCOPE, '003', JSON.stringify(customer), record('customers', customer).payloadHash, snapshot, JSON.stringify(proof)]);
+   await assert.rejects(importProfile(branchCustomer, { ...header, FTCstCode: 'AR003-000098' }), /BRANCH_CUSTOMER_SCOPE_REFUSED/);
+   await assert.rejects(importProfile(branchCustomer, { ...header, FCShdGrand: '123.46' }), /BRANCH_RECEIPT_PROOF_REQUIRED/);
+   await assert.rejects(importProfile({ ...branchCustomer, FTBchCode: '004' }), /BRANCH_CUSTOMER_SCOPE_REFUSED/);
+   assert.equal((await importProfile()).rows[0].n, 1);
+   assert.equal((await importProfile()).rows[0].n, 0);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.customers WHERE ada_code=$1', [branchCustomer.FTCstCode])).rows[0].n, 0);
+   const profile = (await worker.query('SELECT directory_id,profile_origin,native_source_id FROM ada_history.customer_profiles WHERE ada_code=$1', [branchCustomer.FTCstCode])).rows[0];
+   assert.equal(profile.profile_origin, 'branch'); assert.equal(profile.native_source_id, 'branch003/AdaAcc');
+   const claim = (await worker.query('SELECT user_id FROM ada_history.purchase_claims WHERE receipt_no=$1', [header.FTShdDocNo])).rows[0];
+   assert.equal(claim.user_id, profile.directory_id);
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.directory WHERE id=$1', [profile.directory_id])).rows[0].n, 1);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.member_links')).rows[0].n, 0);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM public.users')).rows[0].n, 0);
+   await apply(worker, 'customers', [record('customers', { ...branchCustomer, FTCstName: 'Synthetic HQ authoritative name' })], snapshot, branchCustomer.FTCstCode);
+   assert.equal((await importProfile()).rows[0].n, 0);
+   const authoritative = (await worker.query('SELECT directory_id,profile_origin,name FROM ada_history.customer_profiles WHERE ada_code=$1', [branchCustomer.FTCstCode])).rows;
+   assert.deepEqual(authoritative, [{ directory_id: profile.directory_id, profile_origin: 'hq', name: 'Synthetic HQ authoritative name' }]);
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.purchase_claims WHERE receipt_no=$1', [header.FTShdDocNo])).rows[0].n, 1);
+   assert.equal((await admin.query("SELECT has_table_privilege('inbound_other','ada_history.branch_customer_profiles','SELECT') allowed")).rows[0].allowed, false);
+  });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });
