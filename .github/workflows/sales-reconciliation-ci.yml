@@ -1,0 +1,17 @@
+name: Sales reconciliation checks
+on:
+  push:
+    paths: ['sync-agent/sales-import/reconciliation*', '.github/workflows/sales-reconciliation-ci.yml']
+  pull_request:
+    paths: ['sync-agent/sales-import/reconciliation*', '.github/workflows/sales-reconciliation-ci.yml']
+permissions:
+  contents: read
+jobs:
+  operator-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test sync-agent/sales-import/reconciliation.test.cjs
