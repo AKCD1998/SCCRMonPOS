@@ -39,7 +39,19 @@ async function synchronize(pg,source,status){await guard(pg);const snapshot=cryp
  const cache={customers:new Map((await pg.query("SELECT ada_code,payload_hash FROM ada_history.customers WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.ada_code,r.payload_hash])),receipts:new Map((await pg.query("SELECT receipt_key,payload_hash FROM ada_history.receipts WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.receipt_key,r.payload_hash])),lines:new Map((await pg.query("SELECT line_key,payload_hash FROM ada_history.lines WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.line_key,r.payload_hash]))};
  async function send(kind,records,cursor){const changed=records.filter(r=>cache[kind].get(r.key)!==r.payloadHash);for(let i=0;i<changed.length;i+=100)written+=await apply(pg,kind,changed.slice(i,i+100),snapshot,cursor);for(const r of records)cache[kind].set(r.key,r.payloadHash);}
  let after=null;for(;;){const rows=await source.query('customers',{after});if(!rows.length)break;const records=rows.map(p=>record('customers',p));await send('customers',records,records.at(-1).key);customerCount+=rows.length;after=rows.at(-1).FTCstCode;status({state:'importing',phase:'customers',customerCount,receiptCount,lineCount});}
- let afterCustomer=null,afterDoc='';for(;;){const rows=await source.query('receipts',{afterCustomer,afterDoc});if(!rows.length)break;const headers=new Map(rows.map(h=>[h.FTShdDocNo,h]));await send('receipts',rows.map(p=>record('receipts',p)),rows.at(-1).FTShdDocNo);const lines=await source.query('lines',{docs:rows.map(h=>h.FTShdDocNo)});await send('lines',lines.map(p=>record('lines',p,headers)),rows.at(-1).FTShdDocNo);receiptCount+=rows.length;lineCount+=lines.length;afterCustomer=rows.at(-1).FTCstCode;afterDoc=rows.at(-1).FTShdDocNo;status({state:'importing',phase:'history',customerCount,receiptCount,lineCount});}
+ let afterCustomer=null,afterDoc='';for(;;){
+  const rows=await source.query('receipts',{afterCustomer,afterDoc});if(!rows.length)break;
+  const headers=new Map(rows.map(h=>[h.FTShdDocNo,h]));
+  const lines=await source.query('lines',{docs:rows.map(h=>h.FTShdDocNo)});
+  if(rows.some(h=>!lines.some(l=>l.FTShdDocNo===h.FTShdDocNo)))throw Error('HISTORY_SOURCE_ITEMS_PENDING');
+  const headerRecords=rows.map(p=>record('receipts',p)),lineRecords=lines.map(p=>record('lines',p,headers));
+  await pg.query('BEGIN');try{
+   await send('receipts',headerRecords,rows.at(-1).FTShdDocNo);
+   await send('lines',lineRecords,rows.at(-1).FTShdDocNo);
+   await pg.query('COMMIT');
+  }catch(error){await pg.query('ROLLBACK');throw error;}
+  receiptCount+=rows.length;lineCount+=lines.length;afterCustomer=rows.at(-1).FTCstCode;afterDoc=rows.at(-1).FTShdDocNo;status({state:'importing',phase:'history',customerCount,receiptCount,lineCount});
+ }
  return {customerCount,receiptCount,lineCount,written};}
 function profile(row){const phone=String(row.phone_number||'').replace(/\D/g,'').replace(/^66(?=\d{9}$)/,'0'),name=String(row.full_name||'').trim(),email=String(row.email||'').trim().toLowerCase();if(!name||name.length>200||!/^0\d{9}$/.test(phone)||email.length>100)throw Error('PROFILE_NOT_REPRESENTABLE');return {name,phone,email};}
 async function outbound(pg,source,{onOutcome=()=>{},registrationConfirmationEnabled=false}={}){

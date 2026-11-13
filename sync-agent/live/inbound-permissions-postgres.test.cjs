@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const { Client } = require('pg');
-const { apply, MARKER, SCOPE } = require('./worker.cjs');
+const { apply, synchronize, MARKER, SCOPE } = require('./worker.cjs');
 const { record } = require('../history/model.cjs');
 const { recentHistory } = require('./recent-history.cjs');
 const raw = process.env.SCCRM_INBOUND_TEST_DATABASE_URL;
@@ -145,6 +145,32 @@ test('restricted inbound customer updates survive the private expression-index n
    await assert.rejects(worker.query('SELECT ada_history.apply_branch_receipt_packet($1,$2,$3,$4::jsonb,$5::jsonb,$6)',['branch004/AdaAcc',MARKER,SCOPE,JSON.stringify([serialize(record('receipts',atomicHeader))]),JSON.stringify([{...serialize(record('lines',atomicLine,new Map([[atomicHeader.FTShdDocNo,atomicHeader]]))),owner_code:'AR003-000098'}]),snapshot]),/LINE_OWNER_OR_IDENTITY_MISMATCH/);
    assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.receipts WHERE doc_no=$1',[atomicHeader.FTShdDocNo])).rows[0].n,0);
    assert.equal(await packet([atomicLine]),2);assert.equal(await packet([atomicLine]),0);
+  });
+  await t.test('native legacy codes and later HQ arrivals retain the exact original branch owner',async()=>{
+   await admin.query(fs.readFileSync(path.join(__dirname,'../../supabase/migrations/20261113041249_ada_inbound_source_identity_guards.sql'),'utf8'));
+   const customer={FTCstCode:'LEGACY_NATIVE_1',FTCstName:'Synthetic native legacy identity',FTBchCode:'004',FTCstStaActive:'1'};
+   await apply(worker,'customers',[record('customers',customer)],snapshot,customer.FTCstCode);
+   const h={FTShdDocNo:'S2404004001-0000096',FTBchCode:'004',FTPosCode:'001',FTShdDocType:'1',FTShdStaPaid:'3',FTShdStaDoc:'1',FTCstCode:customer.FTCstCode,FDShdDocDate:'2024-04-11T00:00:00.000',FTShdDocTime:'14:01:02',FCShdGrand:'17.5'};
+   const rh=record('receipts',h),serialize=r=>({source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload});
+   await worker.query('SELECT ada_history.apply_source_batch($1,$2,$3,$4,$5::jsonb,$6,$7)',['branch004/AdaAcc',MARKER,SCOPE,'receipts',JSON.stringify([serialize(rh)]),snapshot,h.FTShdDocNo]);
+   await assert.rejects(apply(worker,'receipts',[record('receipts',{...h,FTCstCode:'AR003-000099'})],snapshot,h.FTShdDocNo),/CROSS_SOURCE_RECEIPT_OWNER_CONFLICT/);
+   assert.equal((await worker.query("SELECT count(*)::int n FROM ada_history.receipts WHERE source_id='hq000/AdaAcc' AND doc_no=$1",[h.FTShdDocNo])).rows[0].n,0);
+   await apply(worker,'receipts',[rh],snapshot,h.FTShdDocNo);
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.history_receipts WHERE doc_no=$1',[h.FTShdDocNo])).rows[0].n,1);
+  });
+  await t.test('full HQ reconciliation also rolls back a header when a later item chunk fails',async()=>{
+   const h={FTShdDocNo:'S2611003001-0000095',FTBchCode:'003',FTPosCode:'001',FTShdDocType:'1',FTShdStaPaid:'3',FTShdStaDoc:'1',FTCstCode:'AR003-000099',FDShdDocDate:'2026-11-13T00:00:00.000',FTShdDocTime:'14:01:02',FCShdGrand:'12.5'};
+   let qty='invalid-number';
+   const source={async query(action,params){
+    if(action==='customers')return [];
+    if(action==='receipts')return params.afterCustomer?[]:[h];
+    if(action==='lines')return [{FTShdDocNo:h.FTShdDocNo,FTBchCode:'003',FNSdtSeqNo:1,FCSdtQty:qty,FCSdtNet:'12.5'}];
+    throw Error('UNEXPECTED_SOURCE_ACTION');
+   }};
+   await assert.rejects(synchronize(worker,source,()=>{}),{code:'22P02'});
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.receipts WHERE doc_no=$1',[h.FTShdDocNo])).rows[0].n,0);
+   qty='1.5';assert.equal((await synchronize(worker,source,()=>{})).written,2);
+   assert.equal((await synchronize(worker,source,()=>{})).written,0);
   });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });
