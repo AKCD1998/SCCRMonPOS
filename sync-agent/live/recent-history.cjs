@@ -36,7 +36,11 @@ async function recentHistory({ pg, source, guard, apply, progress = () => {} }) 
   const codes = [...new Set(ready.map(h => h.FTCstCode))];
   const customers = codes.length ? await source.query('customersForCodes', { codes }) : [];
   if (customers.some(c => !codes.includes(c.FTCstCode)) || new Set(customers.map(c => c.FTCstCode)).size !== customers.length) throw Error('RECENT_CUSTOMER_SCOPE_REFUSED');
-  missingCustomerCount += codes.filter(code => !customers.some(c => c.FTCstCode === code)).length;
+  const missingCodes = codes.filter(code => !customers.some(c => c.FTCstCode === code));
+  if (missingCodes.length) {
+   const resolved = new Set((await pg.query("SELECT ada_code FROM ada_history.customer_profiles WHERE source_id='hq000/AdaAcc' AND ada_code=ANY($1::text[])", [missingCodes])).rows.map(c => c.ada_code));
+   missingCustomerCount += missingCodes.filter(code => !resolved.has(code)).length;
+  }
   const customerRecords = customers.map(p => record('customers', p));
   const headerRecords = ready.map(p => record('receipts', p));
   // Never expose a newly imported header without its item snapshot. Source I/O

@@ -2,7 +2,7 @@
 const { test } = require('node:test'), assert = require('node:assert/strict');
 const { recentHistory } = require('./recent-history.cjs');
 const { configuration } = require('./scheduler.cjs');
-function fixture({ noLines = false, wrongCustomer = false, failLines = false } = {}) {
+function fixture({ noLines = false, wrongCustomer = false, failLines = false, missingCustomer = false, verifiedBranchProfile = false } = {}) {
  const calls = [], writes = [], transactions = [];
  const header = { FTBchCode: '001', FTPosCode: 'POS001', FTShdDocType: '1', FTShdDocNo: 'S2611001001-0000001', FTCstCode: 'AR001-000001', FTShdStaPaid: '3', FDShdDocDate: '2026-11-13T00:00:00.000', FTShdDocTime: '10:00:00' };
  const line = { FTShdDocNo: header.FTShdDocNo, FNSdtSeqNo: 1, FTBchCode: '001', FCSdtQty: '2.5' };
@@ -11,10 +11,10 @@ function fixture({ noLines = false, wrongCustomer = false, failLines = false } =
   if (action === 'historyWindow') return [{ floor: '2026-11-11T00:00:00' }];
   if (action === 'recentReceipts') return params.afterDoc ? [] : [header];
   if (action === 'lines') return noLines ? [] : [line];
-  if (action === 'customersForCodes') return [{ FTCstCode: wrongCustomer ? 'AR002-000001' : header.FTCstCode, FTCstName: 'Synthetic member' }];
+  if (action === 'customersForCodes') return missingCustomer ? [] : [{ FTCstCode: wrongCustomer ? 'AR002-000001' : header.FTCstCode, FTCstName: 'Synthetic member' }];
   throw Error('UNEXPECTED_SOURCE_ACTION');
  } };
- const pg = { async query(sql) { transactions.push(sql); return { rows: [] }; } };
+ const pg = { async query(sql) { transactions.push(sql); return { rows: verifiedBranchProfile && sql.includes('FROM ada_history.customer_profiles') ? [{ ada_code: header.FTCstCode }] : [] }; } };
  const apply = async (_pg, kind, records) => { writes.push([kind, records]); if (failLines && kind === 'lines') throw Error('FIXTURE_LINE_FAILURE'); return records.length; };
  return { calls, writes, transactions, run: () => recentHistory({ pg, source, guard: async () => {}, apply }) };
 }
@@ -45,4 +45,11 @@ test('receipt polling is bounded independently from the slower reconciliation in
  assert.equal(configuration({}).receiptPollMs, 10000);
  assert.equal(configuration({}).historyPollMs, 300000);
  for (const receiptPollMs of [0, 4999, 60001, 1.5]) assert.throws(() => configuration({ receiptPollMs }), /LIVE_POLL_CONFIG_REFUSED/);
+});
+test('a receipt-verified branch profile satisfies history completeness before the native HQ profile arrives',async()=>{
+ const result=await fixture({missingCustomer:true,verifiedBranchProfile:true}).run();
+ assert.equal(result.receiptCount,1);assert.equal(result.missingCustomerCount,0);
+});
+test('a genuinely absent profile remains visible as incomplete',async()=>{
+ const result=await fixture({missingCustomer:true}).run();assert.equal(result.missingCustomerCount,1);
 });
