@@ -6,6 +6,7 @@ const { Client } = require('pg');
 const { apply, synchronize, MARKER, SCOPE } = require('./worker.cjs');
 const { record } = require('../history/model.cjs');
 const { recentHistory } = require('./recent-history.cjs');
+const {BranchHistory}=require('./branch-history.cjs');
 const raw = process.env.SCCRM_INBOUND_TEST_DATABASE_URL;
 
 test('restricted inbound customer updates survive the private expression-index normalizer', { skip: !raw }, async (t) => {
@@ -171,6 +172,59 @@ test('restricted inbound customer updates survive the private expression-index n
    assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.receipts WHERE doc_no=$1',[h.FTShdDocNo])).rows[0].n,0);
    qty='1.5';assert.equal((await synchronize(worker,source,()=>{})).written,2);
    assert.equal((await synchronize(worker,source,()=>{})).written,0);
+  });
+  await t.test('independent branch readers replay once and a stalled branch holds no destination lock',async()=>{
+   await admin.query(fs.readFileSync(path.join(__dirname,'../../supabase/migrations/20261113042923_ada_inbound_branch_customer_stream.sql'),'utf8'));
+   const h={FTShdDocNo:'S2611004001-0000093',FTBchCode:'004',FTPosCode:'001',FTShdDocType:'1',FTShdStaPaid:'3',FTShdStaDoc:'1',FTCstCode:'AR003-000099',FDShdDocDate:'2026-11-13T00:00:00.000',FTShdDocTime:'14:01:02',FCShdGrand:'15.25'};
+   const first={headers:[h],lines:[{FTShdDocNo:h.FTShdDocNo,FTBchCode:'004',FNSdtSeqNo:1,FTPdtCode:'SYNTHETIC-STREAM',FCSdtQty:'2.5',FCSdtNet:'15.25'}]};
+   let release,started;const blocked=new Promise(r=>{release=r;}),ready=new Promise(r=>{started=r;});
+   const states=[],sources=new Map();
+   const engine=new BranchHistory(worker,{guard:async()=>{},marker:MARKER,scope:SCOPE,onStatus:(b,s)=>states.push([b,s]),sourceFactory:branch=>{
+    const source={closed:false,close(){this.closed=true;},async query(action,params){
+     if(branch==='005'){started();await blocked;this.closed=true;throw Error('SOURCE_PROCESS_ENDED');}
+     if(action==='historyWindow')return [{floor:'2026-11-11T00:00:00'}];
+     if(action==='recentReceipts')return params.afterDoc?[]:[{FTShdDocNo:h.FTShdDocNo,FDShdDocDate:h.FDShdDocDate}];
+     if(action==='snapshot')return {ok:true,branch,sourceId:'branch'+branch+'/AdaAcc',first,second:structuredClone(first),productionWrites:0,pinRead:false};
+     throw Error('UNEXPECTED_SOURCE_ACTION');
+    }};sources.set(branch,source);return source;
+   }});
+   try{
+    const slow=engine.cycle('005');await ready;
+    assert.equal((await engine.cycle('004')).written,2);
+    assert.equal((await engine.cycle('004')).written,0);
+    release();assert.equal((await slow).state,'retrying');
+    assert.equal((await engine.cycle('004')).state,'healthy');
+    assert.equal(sources.get('004').closed,false);
+    assert.ok(states.some(([b,s])=>b==='005'&&s.state==='retrying'));
+    assert.ok(states.some(([b,s])=>b==='004'&&s.state==='healthy'));
+    assert.equal(JSON.stringify(states).includes('SYNTHETIC-STREAM'),false);
+   }finally{release();engine.close();}
+  });
+  await t.test('a branch-born member profile follows its exact home code across branches and yields to HQ later',async()=>{
+   const customer={FTCstCode:'AR003-900998',FTCstName:'Synthetic branch-born customer',FTCstTel:'0990000098',FTBchCode:'003',FTCstStaActive:'1'};
+   const h={FTShdDocNo:'S2611004001-0000092',FTBchCode:'004',FTPosCode:'001',FTShdDocType:'1',FTShdStaPaid:'3',FTShdStaDoc:'1',FTCstCode:customer.FTCstCode,FDShdDocDate:'2026-11-13T00:00:00.000',FTShdDocTime:'14:01:02',FCShdGrand:'12.5'};
+   const first={headers:[h],lines:[{FTShdDocNo:h.FTShdDocNo,FTBchCode:'004',FNSdtSeqNo:1,FCSdtQty:'1',FCSdtNet:'12.5'}]};
+   let atHQ=false;const calls=[];
+   const engine=new BranchHistory(worker,{guard:async()=>{},marker:MARKER,scope:SCOPE,hqProfileReader:async codes=>{assert.deepEqual(codes,[customer.FTCstCode]);return atHQ?[{...customer,FTCstName:'Synthetic authoritative HQ arrival'}]:[];},sourceFactory:branch=>({closed:false,close(){this.closed=true;},async query(action,params){
+    calls.push([branch,action]);
+    if(action==='profiles'){assert.equal(branch,'003');assert.deepEqual(params.codes,[customer.FTCstCode]);return [customer];}
+    if(action==='historyWindow')return [{floor:'2026-11-11T00:00:00'}];
+    if(action==='recentReceipts')return params.afterDoc?[]:[{FTShdDocNo:h.FTShdDocNo,FDShdDocDate:h.FDShdDocDate}];
+    if(action==='snapshot')return {ok:true,branch,sourceId:'branch'+branch+'/AdaAcc',first,second:structuredClone(first),productionWrites:0,pinRead:false};
+    throw Error('UNEXPECTED_SOURCE_ACTION');
+   }})});
+   try{
+    const result=await engine.cycle('004');assert.equal(result.state,'healthy');assert.equal(result.missingCustomerCount,0);
+    const original=(await worker.query('SELECT directory_id,profile_origin,native_source_id FROM ada_history.customer_profiles WHERE ada_code=$1',[customer.FTCstCode])).rows[0];
+    assert.equal(original.profile_origin,'branch');assert.equal(original.native_source_id,'branch003/AdaAcc');
+    assert.equal((await worker.query('SELECT user_id FROM ada_history.purchase_claims WHERE receipt_no=$1',[h.FTShdDocNo])).rows[0].user_id,original.directory_id);
+    assert.equal((await admin.query('SELECT count(*)::int n FROM public.users WHERE id=$1',[original.directory_id])).rows[0].n,0);
+    assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.member_links WHERE ada_code=$1',[customer.FTCstCode])).rows[0].n,0);
+    assert.ok(calls.some(([b,a])=>b==='003'&&a==='profiles'));
+    atHQ=true;assert.equal((await engine.cycle('004')).state,'healthy');
+    const authoritative=(await worker.query('SELECT directory_id,profile_origin,name FROM ada_history.customer_profiles WHERE ada_code=$1',[customer.FTCstCode])).rows;
+    assert.deepEqual(authoritative,[{directory_id:original.directory_id,profile_origin:'hq',name:'Synthetic authoritative HQ arrival'}]);
+   }finally{engine.close();}
   });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });

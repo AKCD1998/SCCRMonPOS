@@ -1,6 +1,5 @@
 'use strict';
 const path=require('node:path'),{spawnSync}=require('node:child_process');
-const {readAdmin}=require('../fanout/admin-source.cjs');
 const {record,hash}=require('../history/model.cjs');
 function verifiedRecords(packet,documents){
  if(!packet.ok||!['001','003','004','005'].includes(packet.branch)||packet.sourceId!=='branch'+packet.branch+'/AdaAcc'||packet.productionWrites!==0||packet.pinRead!==false)throw Error('BRANCH_RECEIPTS_ACK_REFUSED');
@@ -21,7 +20,7 @@ function readBranchReceipts(branch,documents){
  if(!['001','003','004','005'].includes(branch)||!Array.isArray(documents)||!documents.length||documents.length>50||documents.some(d=>!/^([SR])[0-9]{10}-[0-9]{7}$/.test(d.doc)||!['TPSTSalHD','TSHD001','TSHD002'].includes(d.table)))throw Error('BRANCH_RECEIPTS_SCOPE_REFUSED');
  let admin;
  try{
-  admin=readAdmin(branch);
+  admin=require('../fanout/admin-source.cjs').readAdmin(branch);
   const r=spawnSync('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-NonInteractive','-File',path.join(__dirname,'Read-BranchReceipts.ps1')],{windowsHide:true,encoding:'utf8',timeout:25000,maxBuffer:8388608,input:JSON.stringify({scope:'SCCRM-READ-BRANCH-RECEIPTS-V1',branch,documents,admin}),env:{...process.env,PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});
   let p;try{p=JSON.parse(String(r.stdout||'').trim().replace(/^\uFEFF/,''));}catch{throw Error('BRANCH_RECEIPTS_READER_UNAVAILABLE');}
   if(r.status!==0||!p.ok)throw Error(/^BRANCH_RECEIPTS_[A-Z_]+$/.test(p.code||'')?p.code:'BRANCH_RECEIPTS_READ_FAILED');

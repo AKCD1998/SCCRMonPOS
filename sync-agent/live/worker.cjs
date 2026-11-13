@@ -5,13 +5,15 @@ const {resolveExisting,digestMember}=require('./existing-members.cjs');
 const {configuration,runLane}=require('./scheduler.cjs');
 const {failureCode,workerState}=require('./health.cjs');
 const {recentHistory}=require('./recent-history.cjs');
+const {BranchHistory}=require('./branch-history.cjs');
 const ROOT=__dirname,MARKER='ef76cc14-1b6b-49c9-8da7-1bfaea3dd92b',SCOPE='LIVE-HQ000-ADAACC';
 function validate(c,secrets){if(c.scope!=='SCCRM-HQ-LIVE-MEMBERS'||c.marker!==MARKER||c.sql.database!=='AdaAcc'||c.sql.user!=='sccrm_hq_member_sync'||!['tcp:127.0.0.1,49800','tcp:100.90.166.72,49800'].includes(c.sql.server))throw Error('LIVE_SOURCE_CONFIG_REFUSED');const u=new URL(secrets.pgUrl);if(u.hostname!==c.pgHost||u.port!=='5432'||u.pathname!=='/postgres'||!decodeURIComponent(u.username).startsWith('sccrm_hq_live_sync.')||!u.hostname.endsWith('.pooler.supabase.com'))throw Error('LIVE_DESTINATION_CONFIG_REFUSED');return c;}
 class Source{
- constructor(file,password){
+ constructor(file,password,{branch}={}){
   this.pending=new Map();this.sequence=0;this.closed=false;
   const env={...process.env,PSModulePath:'C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\Modules'};
-  this.child=spawn('C:/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-File',path.join(ROOT,'LiveSqlRpc.ps1'),'-ConfigFile',file],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+  if(branch&&!['001','003','004','005'].includes(branch))throw Error('BRANCH_SOURCE_CONFIG_REFUSED');
+  this.child=spawn('C:/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-File',path.join(ROOT,branch?'BranchSqlRpc.ps1':'LiveSqlRpc.ps1'),...(branch?['-Branch',branch]:['-ConfigFile',file])],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
   this.child.stderr.on('data',()=>{});
   readline.createInterface({input:this.child.stdout}).on('line',line=>{
    let r;try{r=JSON.parse(line.replace(/^\uFEFF/,''));}catch{return;}
@@ -21,7 +23,7 @@ class Source{
   });
   this.child.on('error',()=>this.fail('SOURCE_PROCESS_ENDED'));this.child.on('exit',()=>this.fail('SOURCE_PROCESS_ENDED'));
   this.child.stdin.on('error',()=>this.fail('SOURCE_PROCESS_ENDED'));
-  this.child.stdin.write(JSON.stringify({action:'init',sqlPassword:password})+'\n');
+  this.child.stdin.write(JSON.stringify(branch?{action:'init'}:{action:'init',sqlPassword:password})+'\n');
  }
  fail(code){if(this.closed)return;this.closed=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error(code));}this.pending.clear();this.child.kill();}
  query(action,params={}){
@@ -102,14 +104,16 @@ async function run(){
  if(process.env.COMPUTERNAME!=='SERVER')throw Error('HQ_SERVICE_ONLY');
  const configFile=path.join(ROOT,'config.json'),c=JSON.parse(fs.readFileSync(configFile,'utf8')),poll=configuration(c);
  psSecrets('Init');
- const state={members:{state:'waiting-credentials'},history:{state:'waiting-credentials'},receipts:{state:'waiting-credentials'},outbound:{},totals:{},outcomes:[]};
- const publish=()=>{const phase=workerState(state.members,state.history,state.receipts);
-  fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,state:phase,...state.totals,outbound:state.outbound,members:state.members,history:state.history,receipts:state.receipts,lastCycle:state.lastCycle,memberPollMs:poll.memberPollMs,historyPollMs:poll.historyPollMs,receiptPollMs:poll.receiptPollMs,lastMemberOutcomes:state.outcomes}));};
+ const state={members:{state:'waiting-credentials'},history:{state:'waiting-credentials'},receipts:{state:'waiting-credentials'},branches:{},outbound:{},totals:{},outcomes:[]};
+ if(poll.branchHistoryEnabled)for(const branch of poll.branchHistoryBranches)state.branches[branch]={state:'waiting-credentials'};
+ const publish=()=>{const phase=workerState(state.members,state.history,state.receipts,...Object.values(state.branches));
+  fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({at:new Date().toISOString(),scope:SCOPE,pid:process.pid,state:phase,...state.totals,outbound:state.outbound,members:state.members,history:state.history,receipts:state.receipts,branches:state.branches,lastCycle:state.lastCycle,memberPollMs:poll.memberPollMs,historyPollMs:poll.historyPollMs,receiptPollMs:poll.receiptPollMs,branchHistoryPollMs:poll.branchHistoryPollMs,lastMemberOutcomes:state.outcomes}));};
  publish();while(!fs.existsSync(path.join(ROOT,'runtime/credentials.rsa')))await new Promise(r=>setTimeout(r,1000));
  const secrets=JSON.parse(Buffer.from(psSecrets('Read'),'base64').toString('utf8'));validate(c,secrets);
  const connection={connectionString:secrets.pgUrl,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(path.join(ROOT,'supabase-ca.crt'),'utf8')},connectionTimeoutMillis:8000,query_timeout:20000};
  const historyPg=new Client({...connection,application_name:'SCCRM-HQ-History'}),memberPg=new Client({...connection,application_name:'SCCRM-HQ-FastMembers'}),receiptPg=new Client({...connection,application_name:'SCCRM-HQ-FastReceipts'});
  const historySource=new Source(configFile,secrets.sqlPassword),memberSource=new Source(configFile,secrets.sqlPassword),receiptSource=new Source(configFile,secrets.sqlPassword);
+ let branchPg=null,branchHistory=null;
  let stopping=false,tasks=[];const stopped=()=>stopping||fs.existsSync(path.join(ROOT,'runtime/stop.request'));
  process.on('SIGTERM',()=>{stopping=true;});
  const failed=lane=>error=>{state[lane]={state:'retrying',at:new Date().toISOString(),code:failureCode(error)};publish();if(/SOURCE_PROCESS_ENDED|SOURCE_TIMEOUT|Connection terminated|connection closed/i.test(error.message))throw error;};
@@ -118,13 +122,17 @@ async function run(){
   if(!(await historyPg.query('SELECT pg_try_advisory_lock(731024,1439) locked')).rows[0].locked)throw Error('LIVE_WORKER_ALREADY_RUNNING');
   await memberPg.connect();await guard(memberPg);
   await receiptPg.connect();await guard(receiptPg);
+  if(poll.branchHistoryEnabled){
+   branchPg=new Client({...connection,application_name:'SCCRM-Branch-Inbound'});await branchPg.connect();await guard(branchPg);
+   branchHistory=new BranchHistory(branchPg,{sourceFactory:branch=>new Source(null,null,{branch}),hqProfileReader:codes=>historySource.query('customersForCodes',{codes}),guard,marker:MARKER,scope:SCOPE,fullPollMs:poll.branchHistoryFullPollMs,onStatus:(branch,status)=>{state.branches[branch]=status;publish();}});
+  }
   tasks=[runLane({intervalMs:poll.memberPollMs,stopping:stopped,onError:failed('members'),cycle:async()=>{
    if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.members={state:'paused'};publish();return;}
    const start=Date.now();state.outbound=await outbound(memberPg,memberSource,{registrationConfirmationEnabled:c.registrationConfirmationEnabled===true,onOutcome:outcome=>{
     state.outcomes.push(outcome);if(state.outcomes.length>20)state.outcomes.shift();
     fs.appendFileSync(path.join(ROOT,'status/member-outcomes.jsonl'),JSON.stringify(outcome)+'\n');
    }});state.members={state:'healthy',at:new Date().toISOString(),durationMs:Date.now()-start};publish();
-   await memberPg.query("INSERT INTO ada_history.worker_status VALUES('hq000',$1,$2,now()) ON CONFLICT(worker) DO UPDATE SET state=EXCLUDED.state,details=EXCLUDED.details,updated_at=now()",[workerState(state.members,state.history,state.receipts),JSON.stringify({outbound:state.outbound,members:state.members,history:state.history,receipts:state.receipts,memberPollMs:poll.memberPollMs,receiptPollMs:poll.receiptPollMs})]);
+   await memberPg.query("INSERT INTO ada_history.worker_status VALUES('hq000',$1,$2,now()) ON CONFLICT(worker) DO UPDATE SET state=EXCLUDED.state,details=EXCLUDED.details,updated_at=now()",[workerState(state.members,state.history,state.receipts,...Object.values(state.branches)),JSON.stringify({outbound:state.outbound,members:state.members,history:state.history,receipts:state.receipts,branches:state.branches,memberPollMs:poll.memberPollMs,receiptPollMs:poll.receiptPollMs,branchHistoryPollMs:poll.branchHistoryPollMs})]);
   }}),runLane({intervalMs:poll.receiptPollMs,stopping:stopped,onError:failed('receipts'),cycle:async()=>{
    if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.receipts={state:'paused'};publish();return;}
    const start=Date.now(),result=await recentHistory({pg:receiptPg,source:receiptSource,guard,apply});
@@ -132,10 +140,15 @@ async function run(){
   }}),runLane({intervalMs:poll.historyPollMs,stopping:stopped,onError:failed('history'),cycle:async()=>{
    if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.history={state:'paused'};publish();return;}
    state.lastCycle=await synchronize(historyPg,historySource,progress=>{state.history={...progress,at:new Date().toISOString()};publish();});
-   state.totals=(await historyPg.query("SELECT (SELECT count(*)::int FROM ada_history.customers) customers,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='1') sales,(SELECT count(*)::int FROM ada_history.receipts WHERE doc_type='9') returns,(SELECT count(*)::int FROM ada_history.lines) lines")).rows[0];
+   state.totals=(await historyPg.query("SELECT (SELECT count(*)::int FROM ada_history.customer_profiles) customers,(SELECT count(*)::int FROM ada_history.history_receipts WHERE doc_type='1') sales,(SELECT count(*)::int FROM ada_history.history_receipts WHERE doc_type='9') returns,(SELECT count(*)::int FROM ada_history.lines l JOIN ada_history.history_receipts r ON r.source_id=l.source_id AND r.receipt_key=l.receipt_key) lines")).rows[0];
    state.history={state:'healthy',at:new Date().toISOString()};publish();
-  }})];await Promise.all(tasks);
- }finally{stopping=true;historySource.close();memberSource.close();receiptSource.close();await Promise.allSettled(tasks);await Promise.allSettled([historyPg.end(),memberPg.end(),receiptPg.end()]);}
+  }})];
+  if(branchHistory)for(const branch of poll.branchHistoryBranches)tasks.push(runLane({intervalMs:poll.branchHistoryPollMs,stopping:stopped,onError:error=>{throw error;},cycle:async()=>{
+   if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.branches[branch]={state:'paused'};publish();return;}
+   await branchHistory.cycle(branch);
+  }}));
+  await Promise.all(tasks);
+ }finally{stopping=true;historySource.close();memberSource.close();receiptSource.close();if(branchHistory)branchHistory.close();await Promise.allSettled(tasks);await Promise.allSettled([historyPg.end(),memberPg.end(),receiptPg.end(),...(branchPg?[branchPg.end()]:[])]);}
 }
 if(require.main===module)run().catch(e=>{const code=/^[A-Z_]{5,80}$/.test(e.message)?e.message:'LIVE_WORKER_REFUSED';fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({state:'stopped',at:new Date().toISOString(),code}));process.exitCode=1;});
 module.exports={validate,Source,guard,serialize,apply,synchronize,profile,outbound,run,MARKER,SCOPE};
