@@ -15,6 +15,12 @@ try{
   switch -CaseSensitive($req.action){
    'customers' {$rows=Query ("SELECT TOP(100) "+$select+" FROM dbo.TCNMCst WHERE @after IS NULL OR FTCstCode>@after ORDER BY FTCstCode OPTION(MAXDOP 1)") @{after=$req.after}}
    'customer' {if(([string]$req.code).Length -gt 20){throw 'CODE_REFUSED'};$rows=Query ('SELECT '+$select+' FROM dbo.TCNMCst WHERE FTCstCode=@code') @{code=$req.code}}
+   'customersForCodes' {if($req.codes.Count -lt 1 -or $req.codes.Count -gt 100){throw 'CUSTOMER_SCOPE_REFUSED'};$params=@{};$holders=@(for($j=0;$j -lt $req.codes.Count;$j++){if(([string]$req.codes[$j]).Length -gt 20){throw 'CUSTOMER_SCOPE_REFUSED'};$params['c'+$j]=[string]$req.codes[$j];'@c'+$j});$rows=Query ('SELECT '+$select+' FROM dbo.TCNMCst WHERE FTCstCode IN('+($holders -join ',')+') OPTION(MAXDOP 1)') $params}
+   'historyWindow' {$rows=Query "SELECT CONVERT(varchar(23),CONVERT(datetime,CONVERT(date,DATEADD(day,-2,GETDATE()))),126) [floor]"}
+   'recentReceipts' {
+    if(([string]$req.floor) -notmatch '^\d{4}-\d{2}-\d{2}T00:00:00(\.000)?$' -or ([string]$req.afterDate) -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?$' -or ([string]$req.afterDoc).Length -gt 20){throw 'RECENT_WINDOW_REFUSED'}
+    $rows=Query ("SELECT TOP(100) * FROM dbo.TPSTSalHD WITH(INDEX(IND_TPSTSalHD_FDShdDocDate)) WHERE "+$filter+" AND FDShdDocDate>=CONVERT(datetime,@floor,126) AND (FDShdDocDate>CONVERT(datetime,@afterDate,126) OR(FDShdDocDate=CONVERT(datetime,@afterDate,126) AND FTShdDocNo>@doc)) ORDER BY FDShdDocDate,FTShdDocNo OPTION(MAXDOP 1,RECOMPILE)") @{floor=[string]$req.floor;afterDate=[string]$req.afterDate;doc=[string]$req.afterDoc}
+   }
    'receipts' {$rows=Query ("SELECT TOP(100) * FROM dbo.TPSTSalHD WITH(INDEX(IND_TPSTSalHD_FTCstCode)) WHERE "+$filter+" AND (@customer IS NULL OR FTCstCode>@customer OR(FTCstCode=@customer AND FTShdDocNo>@doc)) ORDER BY FTCstCode,FTShdDocNo OPTION(MAXDOP 1)") @{customer=$req.afterCustomer;doc=[string]$req.afterDoc}}
    'lines' {if($req.docs.Count -lt 1 -or $req.docs.Count -gt 100){throw 'DOCUMENT_SCOPE_REFUSED'};$params=@{};$holders=@(for($j=0;$j -lt $req.docs.Count;$j++){if(([string]$req.docs[$j]).Length -gt 20){throw 'DOCUMENT_SCOPE_REFUSED'};$params['d'+$j]=[string]$req.docs[$j];'@d'+$j});$rows=Query ('SELECT * FROM dbo.TPSTSalDT WHERE FTShdDocNo IN('+($holders -join ',')+') ORDER BY FTShdDocNo,FNSdtSeqNo OPTION(MAXDOP 1)') $params}
    'createMember' {
