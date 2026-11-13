@@ -37,6 +37,18 @@ function psSecrets(action){const r=spawnSync('C:/Windows/System32/WindowsPowerSh
 async function guard(pg){const r=await pg.query('SELECT marker,scope FROM ada_history.meta');if(r.rows.length!==1||r.rows[0].marker!==MARKER||r.rows[0].scope!==SCOPE)throw Error('LIVE_MIRROR_MARKER_REQUIRED');if((await pg.query('SELECT current_user actor')).rows[0].actor!=='sccrm_hq_live_sync')throw Error('LIVE_PG_ROLE_REFUSED');}
 function serialize(r){return {source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload};}
 async function apply(pg,kind,records,snapshot,cursor){if(!records.length)return 0;return Number((await pg.query('SELECT ada_history.apply_batch($1,$2,$3,$4::jsonb,$5,$6) n',[MARKER,SCOPE,kind,JSON.stringify(records.map(serialize)),snapshot,String(cursor)])).rows[0].n);}
+async function historyTotals(pg){
+ // Resolve physical-source precedence once, before joining item rows. Repeated
+ // expansion of the canonical view can exceed the restricted role's timeout.
+ return (await pg.query(`WITH canonical AS MATERIALIZED (
+  SELECT source_id,receipt_key,doc_type FROM ada_history.history_receipts
+ ) SELECT (SELECT count(*)::int FROM ada_history.customer_profiles) customers,
+  count(*) FILTER (WHERE doc_type='1')::int sales,
+  count(*) FILTER (WHERE doc_type='9')::int returns,
+  (SELECT count(*)::int FROM ada_history.lines l JOIN canonical r
+   ON r.source_id=l.source_id AND r.receipt_key=l.receipt_key) lines
+ FROM canonical`)).rows[0];
+}
 async function synchronize(pg,source,status){await guard(pg);const snapshot=crypto.randomUUID();let written=0,customerCount=0,receiptCount=0,lineCount=0;
  const cache={customers:new Map((await pg.query("SELECT ada_code,payload_hash FROM ada_history.customers WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.ada_code,r.payload_hash])),receipts:new Map((await pg.query("SELECT receipt_key,payload_hash FROM ada_history.receipts WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.receipt_key,r.payload_hash])),lines:new Map((await pg.query("SELECT line_key,payload_hash FROM ada_history.lines WHERE source_id='hq000/AdaAcc'")).rows.map(r=>[r.line_key,r.payload_hash]))};
  async function send(kind,records,cursor){const changed=records.filter(r=>cache[kind].get(r.key)!==r.payloadHash);for(let i=0;i<changed.length;i+=100)written+=await apply(pg,kind,changed.slice(i,i+100),snapshot,cursor);for(const r of records)cache[kind].set(r.key,r.payloadHash);}
@@ -140,7 +152,7 @@ async function run(){
   }}),runLane({intervalMs:poll.historyPollMs,stopping:stopped,onError:failed('history'),cycle:async()=>{
    if(fs.existsSync(path.join(ROOT,'runtime/pause.request'))){state.history={state:'paused'};publish();return;}
    state.lastCycle=await synchronize(historyPg,historySource,progress=>{state.history={...progress,at:new Date().toISOString()};publish();});
-   state.totals=(await historyPg.query("SELECT (SELECT count(*)::int FROM ada_history.customer_profiles) customers,(SELECT count(*)::int FROM ada_history.history_receipts WHERE doc_type='1') sales,(SELECT count(*)::int FROM ada_history.history_receipts WHERE doc_type='9') returns,(SELECT count(*)::int FROM ada_history.lines l JOIN ada_history.history_receipts r ON r.source_id=l.source_id AND r.receipt_key=l.receipt_key) lines")).rows[0];
+   state.totals=await historyTotals(historyPg);
    state.history={state:'healthy',at:new Date().toISOString()};publish();
   }})];
   if(branchHistory)for(const branch of poll.branchHistoryBranches)tasks.push(runLane({intervalMs:poll.branchHistoryPollMs,stopping:stopped,onError:error=>{throw error;},cycle:async()=>{
@@ -151,4 +163,4 @@ async function run(){
  }finally{stopping=true;historySource.close();memberSource.close();receiptSource.close();if(branchHistory)branchHistory.close();await Promise.allSettled(tasks);await Promise.allSettled([historyPg.end(),memberPg.end(),receiptPg.end(),...(branchPg?[branchPg.end()]:[])]);}
 }
 if(require.main===module)run().catch(e=>{const code=/^[A-Z_]{5,80}$/.test(e.message)?e.message:'LIVE_WORKER_REFUSED';fs.writeFileSync(path.join(ROOT,'status/status.json'),JSON.stringify({state:'stopped',at:new Date().toISOString(),code}));process.exitCode=1;});
-module.exports={validate,Source,guard,serialize,apply,synchronize,profile,outbound,run,MARKER,SCOPE};
+module.exports={validate,Source,guard,serialize,apply,historyTotals,synchronize,profile,outbound,run,MARKER,SCOPE};
