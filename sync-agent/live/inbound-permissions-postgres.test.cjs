@@ -23,7 +23,7 @@ test('restricted inbound customer updates survive the private expression-index n
    DO $$ BEGIN CREATE ROLE inbound_other NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
    CREATE TABLE public.users(id uuid PRIMARY KEY,full_name text,phone_number text);
    CREATE TABLE public.member_profiles(user_id uuid,member_code text,is_active boolean,created_at timestamptz);
-   CREATE TABLE public.loyalty_claims(branch_code text,receipt_no text);
+   CREATE TABLE public.loyalty_claims(branch_code text,receipt_no text,user_id uuid);
    CREATE TABLE public.native_points(member_id uuid,points integer);`);
   await admin.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   const original = fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20261103035705_hq_member_fast_existing_links.sql'), 'utf8');
@@ -106,6 +106,37 @@ test('restricted inbound customer updates survive the private expression-index n
    assert.deepEqual(authoritative, [{ directory_id: profile.directory_id, profile_origin: 'hq', name: 'Synthetic HQ authoritative name' }]);
    assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.purchase_claims WHERE receipt_no=$1', [header.FTShdDocNo])).rows[0].n, 1);
    assert.equal((await admin.query("SELECT has_table_privilege('inbound_other','ada_history.branch_customer_profiles','SELECT') allowed")).rows[0].allowed, false);
+  });
+  await t.test('physical branch receipts fill HQ gaps without duplicate history or reassigned public claims', async () => {
+   await admin.query(fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20261113035114_ada_inbound_branch_receipts.sql'), 'utf8'));
+   const header = { FTShdDocNo: 'S2404003001-0000098', FDShdDocDate: '2024-04-11T00:00:00.000', FTShdDocTime: '14:01:02', FTBchCode: '003', FTPosCode: '001', FTShdDocType: '1', FTShdStaPaid: '3', FTShdStaDoc: '1', FTCstCode: 'AR003-000099', FCShdGrand: '32.5' };
+   const branchApply = async (sourceId,kind,records) => Number((await worker.query('SELECT ada_history.apply_source_batch($1,$2,$3,$4,$5::jsonb,$6,$7) n',[sourceId,MARKER,SCOPE,kind,JSON.stringify(records.map(r=>({source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload}))),snapshot,header.FTShdDocNo])).rows[0].n);
+   const receipt = record('receipts',header);
+   assert.equal(await branchApply('branch003/AdaAcc','receipts',[receipt]),1);
+   const line=record('lines',{FTShdDocNo:header.FTShdDocNo,FTBchCode:'003',FNSdtSeqNo:1,FTPdtCode:'SYNTHETIC-BRANCH-SKU',FTSdtUnitName:'Synthetic box',FCSdtQty:'2.5',FCSdtNet:'32.5'},new Map([[header.FTShdDocNo,header]]));
+   assert.equal(await branchApply('branch003/AdaAcc','lines',[line]),1);
+   assert.equal(await branchApply('branch003/AdaAcc','receipts',[receipt]),0);
+   const read=()=>worker.query('SELECT user_id,receipt_total_amount,receipt_snapshot FROM ada_history.purchase_claims WHERE receipt_no=$1',[header.FTShdDocNo]);
+   const before=(await read()).rows;assert.equal(before.length,1);assert.equal(Number(before[0].receipt_total_amount),32.5);
+   assert.equal(before[0].receipt_snapshot.items[0].productCode,'SYNTHETIC-BRANCH-SKU');
+   await apply(worker,'receipts',[receipt],snapshot,header.FTShdDocNo);
+   await apply(worker,'lines',[line],snapshot,header.FTShdDocNo);
+   assert.deepEqual((await read()).rows,before);
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.history_receipts WHERE doc_no=$1',[header.FTShdDocNo])).rows[0].n,1);
+   await assert.rejects(branchApply('branch003/AdaAcc','receipts',[record('receipts',{...header,FTCstCode:'AR003-000098'})]),/BRANCH_HQ_OWNER_CONFLICT/);
+   await assert.rejects(branchApply('unowned/AdaAcc','receipts',[receipt]),/HISTORY_SOURCE_REFUSED/);
+   await assert.rejects(branchApply('branch004/AdaAcc','receipts',[receipt]),/BRANCH_HISTORY_SCOPE_REFUSED/);
+   await assert.rejects(branchApply('branch003/AdaAcc','customers',[record('customers',payload)]),/BRANCH_HISTORY_KIND_REFUSED/);
+   await assert.rejects(branchApply('branch003/AdaAcc','receipts',[record('receipts',{...header,FTShdStaDoc:'0'})]),/BRANCH_HISTORY_NOT_FINAL/);
+   const claimed={...header,FTShdDocNo:'S2404003001-0000097'};
+   await admin.query('INSERT INTO public.loyalty_claims VALUES($1,$2,$3)',['003',claimed.FTShdDocNo,'11223344-0000-4000-8000-000000000099']);
+   await assert.rejects(branchApply('branch003/AdaAcc','receipts',[record('receipts',claimed)]),/BRANCH_CLAIM_OWNER_CONFLICT/);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.receipts WHERE doc_no=$1',[claimed.FTShdDocNo])).rows[0].n,0);
+   await admin.query('UPDATE public.loyalty_claims SET user_id=$1 WHERE receipt_no=$2',[before[0].user_id,claimed.FTShdDocNo]);
+   assert.equal(await branchApply('branch003/AdaAcc','receipts',[record('receipts',claimed)]),1);
+   assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.purchase_claims WHERE receipt_no=$1',[claimed.FTShdDocNo])).rows[0].n,0);
+   assert.equal((await admin.query("SELECT has_column_privilege('sccrm_hq_live_sync','public.loyalty_claims','user_id','SELECT') allowed")).rows[0].allowed,false);
+   assert.equal((await admin.query("SELECT has_function_privilege('inbound_other','ada_history.apply_source_batch(text,text,text,text,jsonb,uuid,text)','EXECUTE') allowed")).rows[0].allowed,false);
   });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });
