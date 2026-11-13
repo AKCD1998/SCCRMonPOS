@@ -137,6 +137,14 @@ test('restricted inbound customer updates survive the private expression-index n
    assert.equal((await worker.query('SELECT count(*)::int n FROM ada_history.purchase_claims WHERE receipt_no=$1',[claimed.FTShdDocNo])).rows[0].n,0);
    assert.equal((await admin.query("SELECT has_column_privilege('sccrm_hq_live_sync','public.loyalty_claims','user_id','SELECT') allowed")).rows[0].allowed,false);
    assert.equal((await admin.query("SELECT has_function_privilege('inbound_other','ada_history.apply_source_batch(text,text,text,text,jsonb,uuid,text)','EXECUTE') allowed")).rows[0].allowed,false);
+   const atomicHeader={...header,FTShdDocNo:'S2404004001-0000099',FTBchCode:'004'};
+   const atomicLine={FTShdDocNo:atomicHeader.FTShdDocNo,FTBchCode:'004',FNSdtSeqNo:1,FCSdtQty:'1.5',FCSdtNet:'32.5'};
+   const serialize=r=>({source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload});
+   const packet=async lines=>Number((await worker.query('SELECT ada_history.apply_branch_receipt_packet($1,$2,$3,$4::jsonb,$5::jsonb,$6) n',['branch004/AdaAcc',MARKER,SCOPE,JSON.stringify([serialize(record('receipts',atomicHeader))]),JSON.stringify(lines.map(p=>serialize(record('lines',p,new Map([[atomicHeader.FTShdDocNo,atomicHeader]]))))),snapshot])).rows[0].n);
+   await assert.rejects(packet([]),/BRANCH_PACKET_SCOPE_REFUSED/);
+   await assert.rejects(worker.query('SELECT ada_history.apply_branch_receipt_packet($1,$2,$3,$4::jsonb,$5::jsonb,$6)',['branch004/AdaAcc',MARKER,SCOPE,JSON.stringify([serialize(record('receipts',atomicHeader))]),JSON.stringify([{...serialize(record('lines',atomicLine,new Map([[atomicHeader.FTShdDocNo,atomicHeader]]))),owner_code:'AR003-000098'}]),snapshot]),/LINE_OWNER_OR_IDENTITY_MISMATCH/);
+   assert.equal((await admin.query('SELECT count(*)::int n FROM ada_history.receipts WHERE doc_no=$1',[atomicHeader.FTShdDocNo])).rows[0].n,0);
+   assert.equal(await packet([atomicLine]),2);assert.equal(await packet([atomicLine]),0);
   });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });

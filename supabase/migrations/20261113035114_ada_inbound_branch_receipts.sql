@@ -102,3 +102,34 @@ CREATE OR REPLACE VIEW ada_history.purchase_claims AS
 -- One additional destination session for the branch readers. Existing member,
 -- HQ recent-receipt and full-history sessions remain independent.
 ALTER ROLE sccrm_hq_live_sync CONNECTION LIMIT 4;
+
+-- One call commits each complete source page atomically, including all item
+-- chunks. A failed owner/identity/item check leaves no header-only history.
+CREATE FUNCTION ada_history.apply_branch_receipt_packet(p_source text,p_marker text,p_scope text,
+ p_headers jsonb,p_lines jsonb,p_snapshot uuid) RETURNS integer
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE batch jsonb;changed integer=0;cursor text;
+BEGIN
+ IF p_source IS NULL OR p_source !~ '^branch(001|003|004|005)/AdaAcc$'
+  OR jsonb_typeof(p_headers) IS DISTINCT FROM 'array' OR jsonb_typeof(p_lines) IS DISTINCT FROM 'array'
+  OR jsonb_array_length(p_headers) NOT BETWEEN 1 AND 100 OR jsonb_array_length(p_lines) NOT BETWEEN 1 AND 5000
+ THEN RAISE EXCEPTION 'BRANCH_PACKET_SCOPE_REFUSED';END IF;
+ IF (SELECT count(DISTINCT h->'payload'->>'FTShdDocNo') FROM jsonb_array_elements(p_headers) h)<>jsonb_array_length(p_headers)
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_headers) h WHERE NOT EXISTS(
+   SELECT 1 FROM jsonb_array_elements(p_lines) l WHERE l->'payload'->>'FTShdDocNo'=h->'payload'->>'FTShdDocNo'))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_lines) l WHERE NOT EXISTS(
+   SELECT 1 FROM jsonb_array_elements(p_headers) h WHERE h->'payload'->>'FTShdDocNo'=l->'payload'->>'FTShdDocNo'))
+ THEN RAISE EXCEPTION 'BRANCH_PACKET_INCOMPLETE';END IF;
+ IF EXISTS(SELECT 1 FROM ada_history.lines l WHERE l.source_id=p_source
+  AND EXISTS(SELECT 1 FROM jsonb_array_elements(p_headers) h WHERE h->>'source_key'=l.receipt_key::text)
+  AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_lines) i WHERE i->>'source_key'=l.line_key::text))
+ THEN RAISE EXCEPTION 'BRANCH_SOURCE_ITEMS_REMOVED';END IF;
+ cursor=p_headers->-1->'payload'->>'FTShdDocNo';
+ changed=ada_history.apply_source_batch(p_source,p_marker,p_scope,'receipts',p_headers,p_snapshot,cursor);
+ FOR batch IN SELECT jsonb_agg(value ORDER BY ordinal) FROM jsonb_array_elements(p_lines) WITH ORDINALITY e(value,ordinal)
+  GROUP BY ((ordinal-1)/100) ORDER BY ((ordinal-1)/100)
+ LOOP changed=changed+ada_history.apply_source_batch(p_source,p_marker,p_scope,'lines',batch,p_snapshot,cursor);END LOOP;
+ RETURN changed;
+END $$;
+REVOKE ALL ON FUNCTION ada_history.apply_branch_receipt_packet(text,text,text,jsonb,jsonb,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION ada_history.apply_branch_receipt_packet(text,text,text,jsonb,jsonb,uuid) TO sccrm_hq_live_sync;
