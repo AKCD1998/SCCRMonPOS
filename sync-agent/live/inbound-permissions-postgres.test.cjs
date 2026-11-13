@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const { Client } = require('pg');
-const { apply, synchronize, MARKER, SCOPE } = require('./worker.cjs');
+const { apply, historyTotals, synchronize, MARKER, SCOPE } = require('./worker.cjs');
 const { record } = require('../history/model.cjs');
 const { recentHistory } = require('./recent-history.cjs');
 const {BranchHistory}=require('./branch-history.cjs');
@@ -225,6 +225,22 @@ test('restricted inbound customer updates survive the private expression-index n
     const authoritative=(await worker.query('SELECT directory_id,profile_origin,name FROM ada_history.customer_profiles WHERE ada_code=$1',[customer.FTCstCode])).rows;
     assert.deepEqual(authoritative,[{directory_id:original.directory_id,profile_origin:'hq',name:'Synthetic authoritative HQ arrival'}]);
    }finally{engine.close();}
+  });
+  await t.test('canonical totals count branch bills once and switch item counts to the later HQ packet',async()=>{
+   const before=await historyTotals(worker);
+   const h={FTShdDocNo:'S2611004001-0000090',FTBchCode:'004',FTPosCode:'001',FTShdDocType:'1',FTShdStaPaid:'3',FTShdStaDoc:'1',FTCstCode:'AR003-000099',FDShdDocDate:'2026-11-13T00:00:00.000',FTShdDocTime:'14:01:02',FCShdGrand:'17.5'};
+   const lines=[1,2,3].map(seq=>({FTShdDocNo:h.FTShdDocNo,FTBchCode:'004',FNSdtSeqNo:seq,FCSdtQty:'1',FCSdtNet:'5'}));
+   const serialize=r=>({source_key:r.key,owner_code:r.owner,parent_key:r.parent,payload_hash:r.payloadHash,payload:r.payload});
+   await worker.query('SELECT ada_history.apply_branch_receipt_packet($1,$2,$3,$4::jsonb,$5::jsonb,$6)',[
+    'branch004/AdaAcc',MARKER,SCOPE,JSON.stringify([serialize(record('receipts',h))]),
+    JSON.stringify(lines.slice(0,2).map(p=>serialize(record('lines',p,new Map([[h.FTShdDocNo,h]]))))),snapshot]);
+   assert.deepEqual(await historyTotals(worker),{...before,sales:before.sales+1,lines:before.lines+2});
+   await apply(worker,'receipts',[record('receipts',h)],snapshot,h.FTShdDocNo);
+   await apply(worker,'lines',lines.map(p=>record('lines',p,new Map([[h.FTShdDocNo,h]]))),snapshot,h.FTShdDocNo);
+   assert.deepEqual(await historyTotals(worker),{...before,sales:before.sales+1,lines:before.lines+3});
+   const returned={...h,FTShdDocNo:'R2611004001-0000090',FTShdDocType:'9'};
+   await apply(worker,'receipts',[record('receipts',returned)],snapshot,returned.FTShdDocNo);
+   assert.deepEqual(await historyTotals(worker),{...before,sales:before.sales+1,returns:before.returns+1,lines:before.lines+3});
   });
  } finally { await Promise.allSettled([worker.end(), admin.end()]); }
 });
