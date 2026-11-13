@@ -90,7 +90,7 @@ function installSql(procedures,scope){
 BEGIN TRY BEGIN TRAN;
  IF NOT EXISTS(SELECT 1 FROM dbo.SCCRM_MemberCodeScope WHERE marker='${scope.marker}' AND role='${scope.role}' AND database_name=DB_NAME() AND machine_name=CONVERT(nvarchar(128),SERVERPROPERTY('MachineName'))) RAISERROR('CONTACT_TARGET_SCOPE_REFUSED',16,1);
  IF OBJECT_ID('dbo.SCCRM_ContactPhonesMeta') IS NOT NULL OR OBJECT_ID('dbo.SCCRM_ContactPhones') IS NOT NULL OR OBJECT_ID('dbo.SCCRM_ContactPhoneMatches') IS NOT NULL RAISERROR('CONTACT_INSTALL_ALREADY_PRESENT_REVIEW',16,1);
- ${patches.map(p=>`IF OBJECT_DEFINITION(OBJECT_ID('dbo.${p.name}')) IS NULL OR CONVERT(varbinary(max),OBJECT_DEFINITION(OBJECT_ID('dbo.${p.name}')))<>CONVERT(varbinary(max),${literal(p.original)}) RAISERROR('CONTACT_PROCEDURE_CHANGED',16,1);`).join('\n')}
+ ${patches.map(p=>`IF OBJECT_DEFINITION(OBJECT_ID('dbo.${p.name}')) IS NULL OR CONVERT(varbinary(max),CONVERT(nvarchar(max),OBJECT_DEFINITION(OBJECT_ID('dbo.${p.name}'))))<>CONVERT(varbinary(max),CONVERT(nvarchar(max),${literal(p.original)})) RAISERROR('CONTACT_PROCEDURE_CHANGED',16,1);`).join('\n')}
  ${schema}
  EXEC(${literal(matcher)});
  ${patches.map(p=>'EXEC('+literal(p.patched)+');').join('\n')}
