@@ -64,6 +64,7 @@ internal static class DesktopFeatureCheck
                 RegistrationChoices();
                 MemberEditing();
                 PurchaseHistoryLayout();
+                MemberPreorderWindows();
                 MemberWindowNavigation();
                 CashierWindowSwitching();
             }
@@ -685,6 +686,55 @@ internal static class DesktopFeatureCheck
                 Check(button.Top >= active.Top+48);
                 Check(area.Contains(button));
                 Check(button.Width == 196 && button.Height == 36);
+            }
+        }
+    }
+
+    private static void MemberPreorderWindows()
+    {
+        stage="preorder-modeless-window-and-unsaved-update-guard";
+        var api=new ApiClient("http://127.0.0.1:1");
+        var flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        using(var display=new CustomerDisplayController(Path.Combine(Path.GetTempPath(),"sccrm-preorders-"+Guid.NewGuid().ToString("N"))))
+        using(var member=new MemberClaimForm(api,null,25,"synthetic",null,display))
+        {
+            member.StartPosition=FormStartPosition.Manual;member.Location=new Point(-16000,-16000);member.ShowInTaskbar=false;member.Show();
+            ((Button)typeof(MemberClaimForm).GetField("_btnTabHistory",flags).GetValue(member)).PerformClick();
+            var history=(PurchaseHistoryForm)typeof(MemberClaimForm).GetField("_historyForm",flags).GetValue(member);
+            history.ShowMemberAsync("00000000-0000-4000-8000-000000000001","Synthetic First").GetAwaiter().GetResult();
+            var open=(Button)history.Controls.Find("memberPreorders",true).Single();Check(open.Enabled);Check(open.BackColor.R>open.BackColor.G);
+            open.PerformClick();
+            var child=(MemberPreorderForm)typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history);
+            Check(child!=null&&child.Visible&&!child.Modal&&history.Enabled&&member.Enabled);
+            var tabs=child.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TabControl>().Single();
+            Check(tabs.TabPages[0].Text=="ข้อมูลประวัติพรีออเดอร์"&&tabs.TabPages[1].Text=="ข้อมูลบิลพรีออเดอร์จริง");
+            open.PerformClick();Check(ReferenceEquals(child,typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history)));
+            child.GetType().GetMethod("OpenEditor",flags).Invoke(child,new object[]{null});
+            var editor=(PreorderEntryForm)child.GetType().GetField("_editor",flags).GetValue(child);
+            ((TextBox)editor.GetType().GetField("_notes",flags).GetValue(editor)).Text="Synthetic unsaved input";
+            Check(editor!=null&&!editor.Modal&&member.Enabled&&history.Enabled&&child.Enabled);
+            Check(history.HasPendingPreorderWork&&!member.ReadyForAdminUpdate);
+            member.ReturnToMemberView();Check(!history.Visible&&!child.Visible&&!editor.Visible&&!member.ReadyForAdminUpdate);
+            member.Close();Check(!member.IsDisposed&&editor.Visible); // owner close cannot lose a hidden draft
+            history.ShowMemberAsync("00000000-0000-4000-8000-000000000002","Synthetic Second").GetAwaiter().GetResult();
+            open.PerformClick();Check(ReferenceEquals(child,typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history)));
+            Check(child.MemberId=="00000000-0000-4000-8000-000000000001");
+            ((Button)editor.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Last().Controls.Cast<Control>().Single(c=>c.Text=="ยกเลิกการแก้ไข")).PerformClick();
+            Check(editor.IsDisposed&&!history.HasPendingPreorderWork);
+            member.ReturnToMemberView();Check(member.ReadyForAdminUpdate);
+            member.Close();Check(child.IsDisposed);
+        }
+        stage="preorder-paper-source-and-original-unit-roundtrip";
+        var record=new PreorderHistory {Id=Guid.NewGuid().ToString("D"),Version=2,SourceKind="paper_import",SourceReference="synthetic-paper.jpg",FrequencyMonths=4,
+            Items=new[]{new PreorderItem{ProductCodes=new[]{"SYNTHETIC-A","SYNTHETIC-A2"},ProductName="Synthetic 10 mg",Quantity=1,Unit="10 ชิ้น",SourceDescription="อ่านต้นฉบับไม่ชัด"}}};
+        using(var editor=new PreorderEntryForm(api,"synthetic-id","Synthetic",record))
+        {
+            var request=editor.BuildRequest();Check(request.OccurredOn==null&&request.FrequencyMonths==4&&request.Version==2);
+            Check(request.Items[0].ProductCodes.Length==2&&request.Items[0].Unit=="10 ชิ้น"&&request.Items[0].SourceDescription=="อ่านต้นฉบับไม่ชัด");
+            Check(editor.BuildRequest().RequestId==request.RequestId); // HTTP retry carries one durable request identity
+            using(var stream=new MemoryStream()){
+                new DataContractJsonSerializer(typeof(PreorderSaveRequest)).WriteObject(stream,request);
+                var json=Encoding.UTF8.GetString(stream.ToArray());Check(!json.Contains("awardedPoints")&&!json.Contains("points"));
             }
         }
     }

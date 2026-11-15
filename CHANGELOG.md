@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.27 — 2026-11-15
+
+- Add the orange ระบบพรีออเดอร์ button to the member purchase-history window,
+  with separate source-note and staff-confirmed actual-receipt tabs.
+- Keep paper records, unknown dates, original units and uncertainties editable;
+  propose exact-code receipt matches and require explicit staff confirmation.
+- Reuse modeless windows, bind each editor to its original member, preserve
+  hidden drafts and block updates/owner close until the editor is finished.
+- Use durable request identities for retries; do not create bills or points.
+- Add synthetic desktop window/draft/serialization regression checks.
+
 ## 1.3.26 — 2026-11-12
 
 - Open one reusable, non-modal purchase-history window so it cannot disable the

@@ -66,6 +66,9 @@
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlobalHotKeyManager.cs" />
     <Compile Include="PurchaseHistoryForm.cs" />
+    <Compile Include="MemberPreordersApi.cs" />
+    <Compile Include="MemberPreorderForm.cs" />
+    <Compile Include="PreorderEntryForm.cs" />
     <Compile Include="MemberClaimForm.cs">
       <SubType>Form</SubType>
     </Compile>
