@@ -703,22 +703,28 @@ internal static class DesktopFeatureCheck
             var history=(PurchaseHistoryForm)typeof(MemberClaimForm).GetField("_historyForm",flags).GetValue(member);
             history.ShowMemberAsync("00000000-0000-4000-8000-000000000001","Synthetic First").GetAwaiter().GetResult();
             var open=(Button)history.Controls.Find("memberPreorders",true).Single();Check(open.Enabled);Check(open.BackColor.R>open.BackColor.G);
+            stage="preorder-open-modeless";
             open.PerformClick();
             var child=(MemberPreorderForm)typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history);
             Check(child!=null&&child.Visible&&!child.Modal&&history.Enabled&&member.Enabled);
             var tabs=child.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TabControl>().Single();
             Check(tabs.TabPages[0].Text=="ข้อมูลประวัติพรีออเดอร์"&&tabs.TabPages[1].Text=="ข้อมูลบิลพรีออเดอร์จริง");
             open.PerformClick();Check(ReferenceEquals(child,typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history)));
+            stage="preorder-editor-is-modeless";
             child.GetType().GetMethod("OpenEditor",flags).Invoke(child,new object[]{null});
             var editor=(PreorderEntryForm)child.GetType().GetField("_editor",flags).GetValue(child);
             ((TextBox)editor.GetType().GetField("_notes",flags).GetValue(editor)).Text="Synthetic unsaved input";
             Check(editor!=null&&!editor.Modal&&member.Enabled&&history.Enabled&&child.Enabled);
             Check(history.HasPendingPreorderWork&&!member.ReadyForAdminUpdate);
+            stage="preorder-hidden-editor-still-blocks-update";
             member.ReturnToMemberView();Check(!history.Visible&&!child.Visible&&!editor.Visible&&!member.ReadyForAdminUpdate);
+            stage="preorder-owner-close-preserves-editor";
             member.Close();Check(!member.IsDisposed&&editor.Visible); // owner close cannot lose a hidden draft
+            stage="preorder-member-change-retains-editor-owner";
             history.ShowMemberAsync("00000000-0000-4000-8000-000000000002","Synthetic Second").GetAwaiter().GetResult();
             open.PerformClick();Check(ReferenceEquals(child,typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history)));
             Check(child.MemberId=="00000000-0000-4000-8000-000000000001");
+            stage="preorder-explicit-cancel-releases-update-barrier";
             ((Button)editor.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Last().Controls.Cast<Control>().Single(c=>c.Text=="ยกเลิกการแก้ไข")).PerformClick();
             Check(editor.IsDisposed&&!history.HasPendingPreorderWork);
             member.ReturnToMemberView();Check(member.ReadyForAdminUpdate);
