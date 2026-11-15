@@ -280,7 +280,7 @@ namespace SCCRMonPOS
     //  error responses are NOT retried to avoid double-earn risk.
     // ───────────────────────────────────────────────────────────────────────────
 
-    public class ApiClient
+    public partial class ApiClient
     {
         private static readonly HttpClient _http;
 

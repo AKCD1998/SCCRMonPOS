@@ -42,6 +42,13 @@ namespace SCCRMonPOS
         private int _historyGeneration;
         private int _searchGeneration;
         private bool _loadingPage;
+        private Button _btnPreorders;
+        private MemberPreorderForm _preorders;
+        private string _memberName;
+        private bool _preordersWasVisible;
+        internal bool HasPendingPreorderWork { get { return _preorders != null && !_preorders.IsDisposed && _preorders.HasPendingWork; } }
+        internal bool BlocksAdminUpdate { get { return HasPendingPreorderWork || (_preorders != null && !_preorders.IsDisposed && _preorders.Visible); } }
+        internal void ShowPendingPreorder() { _preorders?.ShowPendingEditor(); }
         internal event EventHandler ReturnToMemberRequested;
         internal Task ShowMemberAsync(string memberId, string memberName) { return LoadHistoryAsync(memberId, memberName); }
 
@@ -52,6 +59,9 @@ namespace SCCRMonPOS
             _initialMemberName = memberName ?? "";
 
             BuildUi();
+            FormClosing += (s,e) => { if(HasPendingPreorderWork) { e.Cancel=true;if(!_preorders.Visible)_preorders.Show(this);_preorders.ShowPendingEditor(); } };
+            FormClosed += (s,e) => _preorders?.Dispose();
+            VisibleChanged += (s,e) => { if(_preorders==null||_preorders.IsDisposed)return;if(!Visible){_preordersWasVisible=_preorders.Visible;_preorders.Hide();}else if(_preordersWasVisible){_preordersWasVisible=false;if(!_preorders.Visible)_preorders.Show(this);} };
 
             Load += async (s, e) =>
             {
@@ -91,6 +101,9 @@ namespace SCCRMonPOS
             };
             titleRow.Controls.Add(lblTitle);
             titleRow.Controls.Add(back);
+            _btnPreorders = new Button { Name="memberPreorders", Text="ระบบพรีออเดอร์", Dock=DockStyle.Right, Width=145, BackColor=Color.FromArgb(190,83,0), ForeColor=Color.White, Enabled=false };
+            _btnPreorders.Click += (s,e) => OpenPreorders();
+            titleRow.Controls.Add(_btnPreorders);
 
             // Search row laid out by a TableLayoutPanel so it stretches with the
             // form and never overflows the right edge.
@@ -304,6 +317,8 @@ namespace SCCRMonPOS
         {
             ++_historyGeneration;
             _memberId = null;
+            _memberName = null;
+            _btnPreorders.Enabled = false;
             _nextCursor = null;
             _loadingPage = false;
             _btnOlder.Visible = false;
@@ -320,6 +335,8 @@ namespace SCCRMonPOS
             {
                 ResetHistory();
                 _memberId = memberId;
+                _memberName = memberName ?? "สมาชิก";
+                _btnPreorders.Enabled = true;
                 _lblMember.Text = "สมาชิก: " + (string.IsNullOrWhiteSpace(memberName) ? "(สมาชิก)" : memberName);
             }
             int generation = _historyGeneration;
@@ -434,6 +451,21 @@ namespace SCCRMonPOS
             _lblReceipt.Text = "";
             _lvItems.Items.Clear();
             _lvReturns.Items.Clear();
+        }
+
+        private void OpenPreorders()
+        {
+            if(string.IsNullOrEmpty(_memberId))return;
+            if(_preorders!=null&&!_preorders.IsDisposed) {
+                if(_preorders.MemberId==_memberId||_preorders.HasPendingWork) {
+                    if(_preorders.WindowState==FormWindowState.Minimized)_preorders.WindowState=FormWindowState.Normal;
+                    if(!_preorders.Visible)_preorders.Show(this);_preorders.Activate();_preorders.ShowPendingEditor();
+                    if(_preorders.MemberId!=_memberId)_lblStatus.Text="มีหน้าพรีออเดอร์ของสมาชิกอีกคนเปิดอยู่ บันทึกหรือปิดหน้านั้นก่อนครับ";
+                    return;
+                }
+                _preorders.Close();
+            }
+            _preorders=new MemberPreorderForm(_api,_memberId,_memberName??"สมาชิก");_preorders.Show(this);
         }
 
         private static string TrimNum(decimal value)

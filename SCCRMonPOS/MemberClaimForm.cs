@@ -29,7 +29,7 @@ namespace SCCRMonPOS
         {
             get {
                 foreach (Form form in OwnedForms)
-                    if (!form.IsDisposed && (!ReferenceEquals(form, _historyForm) || form.Visible)) return true;
+                    if (!form.IsDisposed && (!ReferenceEquals(form, _historyForm) || form.Visible || _historyForm.BlocksAdminUpdate)) return true;
                 return false;
             }
         }
@@ -58,7 +58,7 @@ namespace SCCRMonPOS
                 Bounds = new Rectangle(16, ClientSize.Height - 30, ClientSize.Width - 32, 22),
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
-            _updateNotice.LinkClicked += (s, e) => { Close(); openUpdates(); };
+            _updateNotice.LinkClicked += (s, e) => { Close(); if(IsDisposed) openUpdates(); };
             Controls.Add(_updateNotice);
         }
 
@@ -91,6 +91,13 @@ namespace SCCRMonPOS
             WireEvents();
             BuildExtraMenu();
             RefreshEmptyStates();
+            FormClosing += (s, e) => {
+                if (_historyForm?.HasPendingPreorderWork == true) {
+                    e.Cancel = true;
+                    if(!_historyForm.Visible)_historyForm.Show(this);
+                    _historyForm.ShowPendingPreorder();
+                }
+            };
             FormClosed += (s, e) => { _historyForm?.Dispose(); ++_receiptStatusGeneration; _receiptStatusTip?.Dispose(); _memberReadyTimer?.Dispose(); if (_promotionTimer != null) _promotionTimer.Dispose(); if (_ownsCustomerDisplay) _customerDisplay.Dispose(); };
             _promotionTimer = new Timer { Interval = 30000 };
             _promotionTimer.Tick += async (s, e) => {
