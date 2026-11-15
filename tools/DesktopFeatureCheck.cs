@@ -706,6 +706,7 @@ internal static class DesktopFeatureCheck
             stage="preorder-open-modeless";
             open.PerformClick();
             var child=(MemberPreorderForm)typeof(PurchaseHistoryForm).GetField("_preorders",flags).GetValue(history);
+            Console.WriteLine("preorder-open-state: memberEnabled="+member.Enabled+" historyVisible="+history.Visible+" historyEnabled="+history.Enabled+" buttonVisible="+open.Visible+" childExists="+(child!=null)+" childVisible="+(child?.Visible==true)+" childModal="+(child?.Modal==true));
             Check(child!=null&&child.Visible&&!child.Modal&&history.Enabled&&member.Enabled);
             var tabs=child.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TabControl>().Single();
             Check(tabs.TabPages[0].Text=="ข้อมูลประวัติพรีออเดอร์"&&tabs.TabPages[1].Text=="ข้อมูลบิลพรีออเดอร์จริง");
