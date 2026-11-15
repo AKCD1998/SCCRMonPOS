@@ -59,9 +59,9 @@ namespace SCCRMonPOS
             _initialMemberName = memberName ?? "";
 
             BuildUi();
-            FormClosing += (s,e) => { if(HasPendingPreorderWork) { e.Cancel=true;_preorders.Show(this);_preorders.ShowPendingEditor(); } };
+            FormClosing += (s,e) => { if(HasPendingPreorderWork) { e.Cancel=true;if(!_preorders.Visible)_preorders.Show(this);_preorders.ShowPendingEditor(); } };
             FormClosed += (s,e) => _preorders?.Dispose();
-            VisibleChanged += (s,e) => { if(_preorders==null||_preorders.IsDisposed)return;if(!Visible){_preordersWasVisible=_preorders.Visible;_preorders.Hide();}else if(_preordersWasVisible){_preordersWasVisible=false;_preorders.Show(this);} };
+            VisibleChanged += (s,e) => { if(_preorders==null||_preorders.IsDisposed)return;if(!Visible){_preordersWasVisible=_preorders.Visible;_preorders.Hide();}else if(_preordersWasVisible){_preordersWasVisible=false;if(!_preorders.Visible)_preorders.Show(this);} };
 
             Load += async (s, e) =>
             {
@@ -459,7 +459,7 @@ namespace SCCRMonPOS
             if(_preorders!=null&&!_preorders.IsDisposed) {
                 if(_preorders.MemberId==_memberId||_preorders.HasPendingWork) {
                     if(_preorders.WindowState==FormWindowState.Minimized)_preorders.WindowState=FormWindowState.Normal;
-                    _preorders.Show(this);_preorders.Activate();_preorders.ShowPendingEditor();
+                    if(!_preorders.Visible)_preorders.Show(this);_preorders.Activate();_preorders.ShowPendingEditor();
                     if(_preorders.MemberId!=_memberId)_lblStatus.Text="มีหน้าพรีออเดอร์ของสมาชิกอีกคนเปิดอยู่ บันทึกหรือปิดหน้านั้นก่อนครับ";
                     return;
                 }

@@ -94,7 +94,7 @@ namespace SCCRMonPOS
             FormClosing += (s, e) => {
                 if (_historyForm?.HasPendingPreorderWork == true) {
                     e.Cancel = true;
-                    _historyForm.Show(this);
+                    if(!_historyForm.Visible)_historyForm.Show(this);
                     _historyForm.ShowPendingPreorder();
                 }
             };

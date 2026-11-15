@@ -36,7 +36,7 @@ namespace SCCRMonPOS
             Load+=async(s,e)=>await ReloadAsync();
             FormClosing+=(s,e)=>{if(HasPendingWork){e.Cancel=true;SetError("ยังมีข้อมูลพรีออเดอร์ที่กำลังแก้ไขหรือบันทึกอยู่");ShowPendingEditor();}};
             FormClosed+=(s,e)=>{++_generation;_editor?.Dispose();};
-            VisibleChanged+=(s,e)=>{if(_editor==null||_editor.IsDisposed)return;if(!Visible){_editorWasVisible=_editor.Visible;_editor.Hide();}else if(_editorWasVisible){_editorWasVisible=false;_editor.Show(this);}};
+            VisibleChanged+=(s,e)=>{if(_editor==null||_editor.IsDisposed)return;if(!Visible){_editorWasVisible=_editor.Visible;_editor.Hide();}else if(_editorWasVisible){_editorWasVisible=false;if(!_editor.Visible)_editor.Show(this);}};
         }
         private static DataGridView Grid()
         {
@@ -86,7 +86,7 @@ namespace SCCRMonPOS
             _revoke.Enabled=!_loading&&!_mutationBusy&&Selected<PreorderBill>(_confirmed)!=null;
         }
         private void SetError(string text){_status.ForeColor=Color.Firebrick;_status.Text=text;}
-        internal void ShowPendingEditor(){if(_editor!=null&&!_editor.IsDisposed){if(!Visible)Show();if(_editor.WindowState==FormWindowState.Minimized)_editor.WindowState=FormWindowState.Normal;_editor.Show(this);_editor.Activate();}}
+        internal void ShowPendingEditor(){if(_editor!=null&&!_editor.IsDisposed){if(!Visible)Show();if(_editor.WindowState==FormWindowState.Minimized)_editor.WindowState=FormWindowState.Normal;if(!_editor.Visible)_editor.Show(this);_editor.Activate();}}
         private void OpenEditor(PreorderHistory record)
         {
             if(_editor!=null&&!_editor.IsDisposed){ShowPendingEditor();return;}if(_mutationBusy)return;
