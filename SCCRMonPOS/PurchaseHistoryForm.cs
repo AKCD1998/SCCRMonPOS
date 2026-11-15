@@ -101,7 +101,7 @@ namespace SCCRMonPOS
             };
             titleRow.Controls.Add(lblTitle);
             titleRow.Controls.Add(back);
-            _btnPreorders = new Button { Name="memberPreorders", Text="ระบบพรีออเดอร์", Dock=DockStyle.Right, Width=145, BackColor=Color.FromArgb(190,83,0), ForeColor=Color.White, Enabled=false };
+            _btnPreorders = new Button { Name="memberPreorders", Text="ระบบพรีออเดอร์", Dock=DockStyle.Right, Width=145, BackColor=Color.FromArgb(190,83,0), ForeColor=Color.White };
             _btnPreorders.Click += (s,e) => OpenPreorders();
             titleRow.Controls.Add(_btnPreorders);
 
@@ -318,7 +318,6 @@ namespace SCCRMonPOS
             ++_historyGeneration;
             _memberId = null;
             _memberName = null;
-            _btnPreorders.Enabled = false;
             _nextCursor = null;
             _loadingPage = false;
             _btnOlder.Visible = false;
@@ -336,7 +335,6 @@ namespace SCCRMonPOS
                 ResetHistory();
                 _memberId = memberId;
                 _memberName = memberName ?? "สมาชิก";
-                _btnPreorders.Enabled = true;
                 _lblMember.Text = "สมาชิก: " + (string.IsNullOrWhiteSpace(memberName) ? "(สมาชิก)" : memberName);
             }
             int generation = _historyGeneration;
@@ -455,7 +453,22 @@ namespace SCCRMonPOS
 
         private void OpenPreorders()
         {
-            if(string.IsNullOrEmpty(_memberId))return;
+            if(string.IsNullOrEmpty(_memberId)) {
+                using(var prompt=new Form { Text="ระบบพรีออเดอร์",Font=Font,
+                    ClientSize=new Size(360,125),AutoScaleMode=AutoScaleMode.Font,
+                    FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterParent,
+                    MaximizeBox=false,MinimizeBox=false,ShowInTaskbar=false }) {
+                    var message=new Label { Text="กรุณาพิมพ์ชื่อ/เบอร์โทรสมาชิกก่อน",
+                        Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,Padding=new Padding(16) };
+                    var buttons=new FlowLayoutPanel { Dock=DockStyle.Bottom,Height=52,
+                        FlowDirection=FlowDirection.RightToLeft,Padding=new Padding(8) };
+                    var ok=new Button { Text="ตกลง",DialogResult=DialogResult.OK,Width=80,Height=28 };
+                    buttons.Controls.Add(ok);prompt.Controls.Add(message);prompt.Controls.Add(buttons);
+                    prompt.AcceptButton=ok;prompt.CancelButton=ok;prompt.ShowDialog(this);
+                }
+                _txtSearch.Focus();
+                return;
+            }
             if(_preorders!=null&&!_preorders.IsDisposed) {
                 if(_preorders.MemberId==_memberId||_preorders.HasPendingWork) {
                     if(_preorders.WindowState==FormWindowState.Minimized)_preorders.WindowState=FormWindowState.Normal;
