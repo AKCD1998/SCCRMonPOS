@@ -70,7 +70,7 @@ internal static class DesktopFeatureCheck
             }
             Console.WriteLine("{\"ok\":true,\"checks\":" + checks + ",\"stage\":\"" + stage + "\"}"); return 0;
         }
-        catch (Exception error) { Console.WriteLine("{\"ok\":false,\"checks\":" + checks + ",\"stage\":\"" + stage + "\",\"type\":\"" + error.GetType().Name + "\"}"); return 1; }
+        catch (Exception error) { if(stage.StartsWith("preorder-",StringComparison.Ordinal))Console.Error.WriteLine(error); Console.WriteLine("{\"ok\":false,\"checks\":" + checks + ",\"stage\":\"" + stage + "\",\"type\":\"" + error.GetType().Name + "\"}"); return 1; }
     }
 
     private static UpdateRelease Metadata(string path, string version = "1.2.0")
