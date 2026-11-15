@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.28 — 2026-11-15
+
+- Keep the orange preorder button clickable before member selection. Show a small
+  owned dialog asking staff to enter a member name/phone, with a Thai ตกลง button,
+  then focus member search. Preserve the selected-member preorder flow and all
+  existing save/update barriers.
+
 ## 1.3.27 — 2026-11-15
 
 - Add the orange ระบบพรีออเดอร์ button to the member purchase-history window,
