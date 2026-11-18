@@ -28,7 +28,7 @@ namespace SCCRMonPOS
             this.lblTitle.Font     = new System.Drawing.Font("Tahoma", 10F, System.Drawing.FontStyle.Bold);
             this.lblTitle.Location = new System.Drawing.Point(20, 20);
             this.lblTitle.Name     = "lblTitle";
-            this.lblTitle.Text     = "กรุณากรอกรหัส PIN พนักงาน";
+            this.lblTitle.Text     = "ให้แอดมินลงทะเบียนเครื่องนี้";
             //
             // lblDevice
             //
@@ -43,7 +43,7 @@ namespace SCCRMonPOS
             this.lblPinCaption.AutoSize = true;
             this.lblPinCaption.Location = new System.Drawing.Point(20, 82);
             this.lblPinCaption.Name     = "lblPinCaption";
-            this.lblPinCaption.Text     = "PIN :";
+            this.lblPinCaption.Text     = "รหัส";
             //
             // _txtPin
             //
@@ -70,7 +70,7 @@ namespace SCCRMonPOS
             this._btnLogin.Location                     = new System.Drawing.Point(140, 145);
             this._btnLogin.Name                         = "_btnLogin";
             this._btnLogin.Size                         = new System.Drawing.Size(90, 30);
-            this._btnLogin.Text                         = "เข้าสู่ระบบ";
+            this._btnLogin.Text                         = "ลงทะเบียน";
             this._btnLogin.UseVisualStyleBackColor      = false;
             //
             // _btnCancel
@@ -98,7 +98,7 @@ namespace SCCRMonPOS
             this.MinimizeBox     = false;
             this.Name            = "StaffLoginForm";
             this.StartPosition   = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text            = "SCCRM — ยืนยันตัวตนพนักงาน";
+            this.Text            = "SCCRM — ลงทะเบียนเครื่อง";
             this.TopMost         = true;
             this.ResumeLayout(false);
             this.PerformLayout();

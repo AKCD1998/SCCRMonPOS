@@ -81,3 +81,18 @@ After an authenticated poll, the client optionally writes non-secret operational
 identity metadata to `Common Documents\SCCRM\device-identity.json`. This contains
 only approved node/device identifiers, branch/POS, version, hash and timestamp,
 so an SMB operator can verify identity without reading private token files.
+## Staff access
+
+Use **จัดการสิทธิ์เครื่อง** in Fleet Control on SCProductDev. Select one POS,
+then approve its existing session, issue an enrollment code, or revoke access.
+Approving an existing session does not restart the terminal or rotate its token.
+
+For a new or reinstalled terminal, open the enrollment dialog on the approved
+POS and use its displayed device ID in Fleet Control. The administrator enters
+the resulting code on that terminal. It expires after 30 minutes and can be
+redeemed once. SCCRM saves the resulting session with Windows DPAPI.
+
+Revocation rejects the old session, cancels pending enrollment and makes any
+previous Fleet update job terminal. If an enrollment response is lost after
+the code was accepted, check the device's status before revoking that session
+and issuing a replacement code.
