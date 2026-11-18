@@ -6,9 +6,8 @@ using System.Windows.Forms;
 namespace SCCRMonPOS
 {
     /// <summary>
-    /// Simple PIN entry dialog shown the first time the app runs (or when the
-    /// staff token is missing/revoked).  On success the token is saved via
-    /// StaffAuthManager.  On cancel the app exits.
+    /// Device enrollment dialog for the administrator who installs or restores POS.
+    /// After enrollment the device reuses its encrypted staff session.
     /// </summary>
     public partial class StaffLoginForm : Form
     {
@@ -23,7 +22,7 @@ namespace SCCRMonPOS
             _api  = api;
             _auth = auth;
             InitializeComponent();
-            lblDevice.Text = "Device: " + _auth.DeviceName;
+            lblDevice.Text = "รหัสเครื่อง: " + _auth.DeviceId;
             _txtPin.KeyDown  += (s, e) => { if (e.KeyCode == Keys.Return) { e.SuppressKeyPress = true; PerformLogin(); } };
             _btnLogin.Click  += (s, e) => PerformLogin();
             _btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
@@ -31,10 +30,10 @@ namespace SCCRMonPOS
 
         private async void PerformLogin()
         {
-            string pin = _txtPin.Text;
-            if (string.IsNullOrEmpty(pin))
+            string enrollmentCode = _txtPin.Text.Trim();
+            if (string.IsNullOrEmpty(enrollmentCode))
             {
-                _lblError.Text = "กรุณากรอก PIN";
+                _lblError.Text = "กรุณาให้แอดมินลงทะเบียนเครื่อง";
                 return;
             }
 
@@ -45,7 +44,7 @@ namespace SCCRMonPOS
             try
             {
                 string token = await _api.AuthenticateStaffDeviceAsync(
-                    _auth.DeviceId, _auth.DeviceName, pin);
+                    _auth.DeviceId, _auth.DeviceName, enrollmentCode);
                 _auth.SaveToken(token);
                 _api.SetStaffToken(token);
                 DialogResult = DialogResult.OK;

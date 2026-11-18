@@ -18,6 +18,7 @@ using System.Windows.Forms;
     [DataMember(Name="version")] public string Version;
     [DataMember(Name="sha256")] public string Hash;
     [DataMember(Name="code")] public string Code;
+    [DataMember(Name="enrollmentCode")] public string EnrollmentCode;
     [DataMember(Name="devices")] public FleetConsoleDevice[] Devices;
     [DataMember(Name="jobs")] public FleetConsoleJob[] Jobs;
     [DataMember(Name="notReady")] public FleetConsoleNotReady[] NotReady;
@@ -32,6 +33,7 @@ using System.Windows.Forms;
     [DataMember(Name="lastSeenAt")] public string Seen;
     [DataMember(Name="enrolled")] public bool Enrolled;
     [DataMember(Name="online")] public bool Online;
+    [DataMember(Name="staffAccess")] public string StaffAccess;
     [DataMember(Name="jobState")] public string JobState;
     [DataMember(Name="targetVersion")] public string Target;
 }
@@ -42,6 +44,11 @@ using System.Windows.Forms;
     [DataMember(Name="requestId")] public string Id;
     [DataMember(Name="nodeIds")] public string[] Nodes;
     [DataMember(Name="expectedReleaseHash")] public string Hash;
+}
+[DataContract] public sealed class FleetStaffAccessRequest
+{
+    [DataMember(Name="nodeId")] public string NodeId;
+    [DataMember(Name="deviceId", EmitDefaultValue=false)] public string DeviceId;
 }
 internal sealed class FleetConsole : Form
 {
@@ -77,13 +84,15 @@ internal sealed class FleetConsole : Form
         }finally{Array.Clear(secret,0,secret.Length);}
         grid.Columns.Add(new DataGridViewCheckBoxColumn {Name="selected",HeaderText="เลือก",FillWeight=35});
         grid.CurrentCellDirtyStateChanged+=(s,e)=>{if(grid.IsCurrentCellDirty)grid.CommitEdit(DataGridViewDataErrorContexts.Commit);};
-        foreach(string title in new[]{"สาขา","POS","ชื่อเครื่อง","รุ่นปัจจุบัน","ติดต่อครั้งล่าสุด","สถานะคำสั่ง","รุ่นเป้าหมาย"})grid.Columns.Add(title,title);
+        foreach(string title in new[]{"สาขา","POS","ชื่อเครื่อง","รุ่นปัจจุบัน","ติดต่อครั้งล่าสุด","สถานะคำสั่ง","รุ่นเป้าหมาย","สิทธิ์เครื่อง"})grid.Columns.Add(title,title);
         foreach(DataGridViewColumn column in grid.Columns)if(column.Name!="selected")column.ReadOnly=true;
         var bar=new FlowLayoutPanel {Dock=DockStyle.Top,Height=55,Padding=new Padding(8)};
         var all=new Button {Text="เลือกทุกสาขา",AutoSize=true};all.Click+=(s,e)=>{foreach(DataGridViewRow row in grid.Rows)row.Cells[0].Value=true;};
         var refresh=new Button {Text="รีเฟรช",AutoSize=true};refresh.Click+=async(s,e)=>await RefreshAsync();
+        var access=new Button {Text="จัดการสิทธิ์เครื่อง",AutoSize=true};
+        access.Click+=async(s,e)=>await ManageAccessAsync();
         send.Click+=async(s,e)=>await IssueAsync();pause.Click+=async(s,e)=>await PauseAsync();
-        bar.Controls.AddRange(new Control[]{all,send,refresh,pause,releaseLabel});
+        bar.Controls.AddRange(new Control[]{all,send,refresh,pause,access,releaseLabel});
         Controls.Add(grid);Controls.Add(bar);Controls.Add(status);
         timer.Tick+=async(s,e)=>await RefreshAsync();Shown+=async(s,e)=>{await RefreshAsync();timer.Start();};
         FormClosed+=(s,e)=>{timer.Dispose();http.Dispose();};
@@ -109,6 +118,17 @@ internal sealed class FleetConsole : Form
     {
         switch(state){case "pending":return "รอเครื่องรับคำสั่ง";case "downloading":return "กำลังดาวน์โหลด";case "waiting_for_idle":return "รอบันทึกงาน / ปิดหน้าที่แก้ไข";case "installing":case "restarting":return "กำลังเปิดรุ่นใหม่";case "succeeded":return "สำเร็จ — ยืนยันรุ่นแล้ว";case "failed":return "ไม่สำเร็จ — ตรวจเครื่อง";case "expired":return "คำสั่งหมดอายุ";default:return "ยังไม่มีคำสั่ง";}
     }
+    private static string StaffAccessLabel(string state)
+    {
+        switch (state)
+        {
+            case "approved": return "อนุมัติแล้ว";
+            case "existing": return "ใช้เซสชันเดิม";
+            case "revoked": return "เพิกถอนแล้ว";
+            case "pending": return "รอลงทะเบียน";
+            default: return "ยังไม่ลงทะเบียน";
+        }
+    }
     private async Task RefreshAsync()
     {
         if(busy||IsDisposed)return;busy=true;send.Enabled=false;
@@ -119,7 +139,7 @@ internal sealed class FleetConsole : Form
             grid.Rows.Clear();foreach(var d in data.Devices??new FleetConsoleDevice[0])
             {
                 DateTime seen;string last=DateTime.TryParse(d.Seen,out seen)?seen.ToLocalTime().ToString("dd/MM HH:mm:ss"):"ยังไม่รายงาน";
-                int i=grid.Rows.Add(selected.Contains(d.NodeId),d.Branch,d.Pos,d.Host,d.Version??"ยังไม่มีตัวรับคำสั่ง",last,d.Enrolled?(d.Online?ThaiState(d.JobState):"ออฟไลน์ / รอเปิด SCCRM · "+ThaiState(d.JobState)):"ต้องติดตั้งรุ่นรับคำสั่งครั้งแรก",d.Target??"—");grid.Rows[i].Tag=d.NodeId;
+                int i=grid.Rows.Add(selected.Contains(d.NodeId),d.Branch,d.Pos,d.Host,d.Version??"ยังไม่มีตัวรับคำสั่ง",last,d.Enrolled?(d.Online?ThaiState(d.JobState):"ออฟไลน์ / รอเปิด SCCRM · "+ThaiState(d.JobState)):"ต้องติดตั้งรุ่นรับคำสั่งครั้งแรก",d.Target??"—",StaffAccessLabel(d.StaffAccess));grid.Rows[i].Tag=d.NodeId;
             }
             try{var release=await Request("release");releaseHash=release.Hash;releaseLabel.Text="รุ่นล่าสุด: "+release.Version;}
             catch{releaseHash=null;releaseLabel.Text="ยังไม่มีรุ่นพร้อมสั่งอัปเดต";}
@@ -127,6 +147,84 @@ internal sealed class FleetConsole : Form
         }
         catch{status.Text="เชื่อมต่อไม่ได้ คำสั่งที่ส่งไว้ยังเก็บอยู่ในระบบ";}
         finally{busy=false;send.Enabled=(enabled&&releaseHash!=null)||File.Exists(pendingFile);}
+    }
+    private async Task ManageAccessAsync()
+    {
+        if (busy) return;
+        grid.EndEdit();
+        DataGridViewRow selected = null;
+        foreach (DataGridViewRow row in grid.Rows)
+        {
+            if (!Convert.ToBoolean(row.Cells[0].Value ?? false)) continue;
+            if (selected != null)
+            {
+                status.Text = "เลือก POS ทีละเครื่องเพื่อจัดการสิทธิ์";
+                return;
+            }
+            selected = row;
+        }
+        if (selected == null)
+        {
+            status.Text = "เลือก POS หนึ่งเครื่องก่อนจัดการสิทธิ์";
+            return;
+        }
+
+        string label = selected.Cells[1].Value + " / POS " + selected.Cells[2].Value + " · " + selected.Cells[3].Value;
+        var body = new FleetStaffAccessRequest { NodeId = (string)selected.Tag };
+        string action;
+        using (var dialog = new Form {
+            Text = "สิทธิ์ SCCRM · " + label, ClientSize = new Size(520, 132),
+            FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false, MinimizeBox = false
+        })
+        {
+            var options = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12) };
+            var prompt = new Label { Text = "รหัสเครื่องจากหน้าลงทะเบียน POS (ใช้เมื่อออกโค้ดใหม่)", Width = 470, Height = 23 };
+            var device = new TextBox { Width = 470, MaxLength = 100 };
+            var approve = new Button { Text = "อนุมัติเซสชันเดิม", AutoSize = true, DialogResult = DialogResult.Yes };
+            var enroll = new Button { Text = "ออกรหัสลงทะเบียน", AutoSize = true, DialogResult = DialogResult.Retry, Enabled = false };
+            var revoke = new Button { Text = "เพิกถอนสิทธิ์", AutoSize = true, DialogResult = DialogResult.No };
+            var cancel = new Button { Text = "ยกเลิก", AutoSize = true, DialogResult = DialogResult.Cancel };
+            device.TextChanged += (s, e) => enroll.Enabled = device.Text.Trim().Length >= 8;
+            options.Controls.AddRange(new Control[] { prompt, device, approve, enroll, revoke, cancel });
+            dialog.Controls.Add(options);
+            dialog.CancelButton = cancel;
+
+            switch (dialog.ShowDialog(this))
+            {
+                case DialogResult.Yes: action = "approve-current"; break;
+                case DialogResult.Retry: action = "issue-code"; body.DeviceId = device.Text.Trim(); break;
+                case DialogResult.No: action = "revoke"; break;
+                default: return;
+            }
+        }
+        if (action == "revoke" && MessageBox.Show(this, "ยืนยันเพิกถอนสิทธิ์ " + label + "?",
+            "SCCRM", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+
+        busy = true;
+        try
+        {
+            var result = await Request("staff/" + action, Json(body));
+            if (action == "issue-code")
+                MessageBox.Show(this, "ให้แอดมินกรอกรหัสนี้ที่ " + label + " ภายใน 30 นาที\n\n" +
+                    result.EnrollmentCode, "รหัสใช้ครั้งเดียว", MessageBoxButtons.OK);
+            else
+                MessageBox.Show(this, (action == "revoke" ? "เพิกถอนสิทธิ์แล้ว · " : "อนุมัติแล้ว · ") +
+                    label, "SCCRM", MessageBoxButtons.OK);
+        }
+        catch (ApiFailure failure)
+        {
+            MessageBox.Show(this, "จัดการสิทธิ์เครื่องไม่สำเร็จ: " + failure.Code, "SCCRM");
+        }
+        catch
+        {
+            MessageBox.Show(this, "โปรดรีเฟรชเพื่อตรวจสอบสถานะเครื่อง", "SCCRM");
+        }
+        finally
+        {
+            busy = false;
+            await RefreshAsync();
+        }
     }
     private async Task IssueAsync()
     {
